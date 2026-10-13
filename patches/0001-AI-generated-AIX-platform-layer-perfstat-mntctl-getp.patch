@@ -1,6 +1,6 @@
-From 3edcbf02f050490d27035810c8e8da45c21db6f3 Mon Sep 17 00:00:00 2001
+From 5441851c6ea70e681c598a974139ad509c413f26 Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Tue, 13 Oct 2026 16:39:27 +0200
+Date: Tue, 13 Oct 2026 18:44:14 +0200
 Subject: [PATCH 1/4] [AI generated] AIX: platform layer (perfstat, mntctl,
  getprocs64), getifaddrs replacement, executable path
 
@@ -35,11 +35,11 @@ Not available on AIX: sensors, battery, GPU.
  src/aix/aix_ifaddrs.hpp  |   56 ++
  src/aix/aix_selfpath.cpp |   75 ++
  src/aix/aix_selfpath.hpp |   34 +
- src/aix/btop_collect.cpp | 1439 ++++++++++++++++++++++++++++++++++++++
+ src/aix/btop_collect.cpp | 1449 ++++++++++++++++++++++++++++++++++++++
  src/btop.cpp             |   15 +-
  src/btop_menu.cpp        |   10 +
  src/btop_shared.hpp      |    6 +-
- 8 files changed, 1755 insertions(+), 2 deletions(-)
+ 8 files changed, 1765 insertions(+), 2 deletions(-)
  create mode 100644 src/aix/aix_ifaddrs.cpp
  create mode 100644 src/aix/aix_ifaddrs.hpp
  create mode 100644 src/aix/aix_selfpath.cpp
@@ -359,10 +359,10 @@ index 0000000..a8fdb60
 +}
 diff --git a/src/aix/btop_collect.cpp b/src/aix/btop_collect.cpp
 new file mode 100644
-index 0000000..cb78185
+index 0000000..4beaf96
 --- /dev/null
 +++ b/src/aix/btop_collect.cpp
-@@ -0,0 +1,1439 @@
+@@ -0,0 +1,1449 @@
 +/* Copyright 2026 Martin Lonkwitz (btop-aix)
 +
 +   Licensed under the Apache License, Version 2.0 (the "License");
@@ -381,7 +381,7 @@ index 0000000..cb78185
 +tab-size = 4
 +*/
 +
-+// Platform layer for IBM AIX (7.1 and later).
++// Platform layer for IBM AIX (6.1 TL7 and later).
 +//
 +// Data sources (all unprivileged, all available since AIX 6.1):
 +//   CPU      perfstat_cpu_total() / perfstat_cpu()    ticks user/sys/idle/wait, load average, clock
@@ -392,9 +392,8 @@ index 0000000..cb78185
 +//   Network  perfstat_netinterface()                  byte counters; getifaddrs() replacement for addresses
 +//   Procs    getprocs64() + getargs()                 process table, command lines
 +//
-+// Structure sizes passed to libperfstat are the ones of the build host. The
-+// 7.1 TL5 and 7.2 TL5 headers carry identical CURR_VERSION_* values and the
-+// 7.2-built probe tools/aix/probes/perfstat_sizes ran unchanged on 7100-05-03.
++// Structure sizes passed to libperfstat start with the ones of the build headers;
++// an older library that rejects them is handled in namespace AixPerfstat below.
 +
 +#include <libperfstat.h>
 +#include <procinfo.h>
@@ -414,6 +413,7 @@ index 0000000..cb78185
 +
 +#include <algorithm>
 +#include <array>
++#include <atomic>
 +#include <cerrno>
 +#include <cmath>
 +#include <cstring>
@@ -468,10 +468,12 @@ index 0000000..cb78185
 +	//? 6100-07 library accepts 616 and perfstat_netinterface_t 224 instead of 240 (7100-02: cpu 616 for a
 +	//? 7100-05 build with 640; measured with tools/aix/probes/perfstat_size_probe.c, the CPU box stayed
 +	//? empty). Every field btop reads lies below the smallest accepted size (highest offsets: cpu_t 88,
-+	//? netinterface_t 176, disk_t 256, cpu_total_t 224, memory_total_t 336 with real_avail since 6.1 TL7;
-+	//? table tools/aix/analysis/perfstat_layout_offsets_5.3-7.3.txt), fields beyond it read as zero.
-+	//? The accepted size is probed once per call; array entries are copied out of a raw buffer with that
-+	//? stride, single structures are read the same way.
++	//? netinterface_t 176, disk_t 256, logicalvolume_t 208, cpu_total_t 224, memory_total_t 336 with
++	//? real_avail since 6.1 TL7; table tools/aix/probes/perfstat_layout/offsets_5.3-7.3.txt), fields beyond
++	//? it read as zero. The accepted size is probed once per call; array entries are copied out of a raw
++	//? buffer with that stride, single structures are read the same way.
++	//? stride/probed are atomic: Tools::system_uptime() reads cpu_total from the main thread while the
++	//? runner thread collects; two threads probing at the same time store the same result.
 +	template <typename T>
 +	class Array {
 +	public:
@@ -482,54 +484,57 @@ index 0000000..cb78185
 +		//* Number of available entries (the count query), < 0 on error with errno set
 +		int count(Fn fn) {
 +			if (not probe(fn)) return -1;
-+			return fn(nullptr, nullptr, (int)stride, 0);
++			return fn(nullptr, nullptr, (int)stride.load(std::memory_order_relaxed), 0);
 +		}
 +
 +		//* Up to `wanted` entries from the first one into `out`; returns the number delivered, < 0 on error
 +		int fetch(Fn fn, int wanted, vector<T> &out) {
 +			out.clear();
 +			if (wanted <= 0 or not probe(fn)) return wanted <= 0 ? 0 : -1;
++			const size_t size = stride.load(std::memory_order_relaxed);  // <= sizeof(T), so raw is large enough
 +			vector<char> raw((size_t)wanted * sizeof(T));
 +			perfstat_id_t first{};
 +			std::strncpy(first.name, first_name, sizeof first.name - 1);
-+			const int got = fn(&first, reinterpret_cast<T *>(raw.data()), (int)stride, wanted);
++			const int got = fn(&first, reinterpret_cast<T *>(raw.data()), (int)size, wanted);
 +			if (got < 0) return got;
 +			out.resize((size_t)got);
 +			for (int i = 0; i < got; i++) {
 +				out[(size_t)i] = T{};
-+				std::memcpy(&out[(size_t)i], raw.data() + (size_t)i * stride, stride);
++				std::memcpy(&out[(size_t)i], raw.data() + (size_t)i * size, size);
 +			}
 +			return got;
 +		}
 +
-+		[[nodiscard]] size_t accepted_size() const { return stride; }
++		[[nodiscard]] size_t accepted_size() const { return stride.load(std::memory_order_relaxed); }
 +
 +	private:
-+		//* First call: shrink the structure size in steps of 8 bytes until the library accepts it
++		//* Until the first success: shrink the structure size in steps of 8 bytes until the library accepts it
 +		bool probe(Fn fn) {
-+			if (probed) return true;
++			if (probed.load(std::memory_order_acquire)) return true;
++			size_t size = sizeof(T);
 +			T one{};
 +			for (;;) {
 +				perfstat_id_t first{};
 +				std::strncpy(first.name, first_name, sizeof first.name - 1);
 +				errno = 0;
-+				if (fn(&first, &one, (int)stride, 1) >= 0) break;
-+				//? a failure for another reason (EACCES, statistics switched off) is not a size problem:
-+				//? keep the size, do not probe again on every refresh, let the caller see the error
-+				if (errno != EINVAL) { probed = true; return false; }
-+				if (stride <= sizeof(T) / 2) return false;
-+				stride -= 8;
++				if (fn(&first, &one, (int)size, 1) >= 0) break;
++				//? a failure for another reason (EACCES, statistics switched off) is not a size problem: no
++				//? shrinking, the caller sees the error; the next refresh tries again (one call), so statistics
++				//? switched on later are still read with the size the library accepts
++				if (errno != EINVAL or size <= sizeof(T) / 2) return false;
++				size -= 8;
 +			}
-+			probed = true;
-+			if (stride != sizeof(T))
-+				Logger::info("{}: libperfstat accepts {} of {} bytes per entry (older release than the build headers)", what, stride, sizeof(T));
++			stride.store(size, std::memory_order_relaxed);
++			probed.store(true, std::memory_order_release);
++			if (size != sizeof(T))
++				Logger::info("{}: libperfstat accepts {} of {} bytes per entry (older release than the build headers)", what, size, sizeof(T));
 +			return true;
 +		}
 +
 +		const char *what;
 +		const char *first_name;
-+		size_t stride = sizeof(T);
-+		bool probed = false;
++		std::atomic<size_t> stride{sizeof(T)};
++		std::atomic<bool> probed{false};
 +	};
 +
 +	//? Same for the "total" calls (perfstat_cpu_total, perfstat_memory_total): no name, one structure.
@@ -541,23 +546,28 @@ index 0000000..cb78185
 +
 +		//* Reads the structure into `out` (zero padded beyond the accepted size); false on error with errno set
 +		bool get(Fn fn, T &out) {
++			const bool done = probed.load(std::memory_order_acquire);
++			size_t size = stride.load(std::memory_order_relaxed);
 +			for (;;) {
 +				out = T{};
 +				errno = 0;
-+				if (fn(nullptr, &out, (int)stride, 1) == 1) break;
-+				if (probed or errno != EINVAL or stride <= sizeof(T) / 2) return false;
-+				stride -= 8;
++				if (fn(nullptr, &out, (int)size, 1) == 1) break;
++				if (done or errno != EINVAL or size <= sizeof(T) / 2) return false;
++				size -= 8;
 +			}
-+			if (not probed and stride != sizeof(T))
-+				Logger::info("{}: libperfstat accepts {} of {} bytes (older release than the build headers)", what, stride, sizeof(T));
-+			probed = true;
++			if (not done) {
++				stride.store(size, std::memory_order_relaxed);
++				probed.store(true, std::memory_order_release);
++				if (size != sizeof(T))
++					Logger::info("{}: libperfstat accepts {} of {} bytes (older release than the build headers)", what, size, sizeof(T));
++			}
 +			return true;
 +		}
 +
 +	private:
 +		const char *what;
-+		size_t stride = sizeof(T);
-+		bool probed = false;
++		std::atomic<size_t> stride{sizeof(T)};
++		std::atomic<bool> probed{false};
 +	};
 +
 +	inline bool cpu_total(perfstat_cpu_total_t &ct) {

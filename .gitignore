@@ -1,2 +1,5 @@
 .*/
 *.swp
+# packages are GitHub release assets, not part of the tree
+rpm/*.rpm
+rpm/*.tar.gz

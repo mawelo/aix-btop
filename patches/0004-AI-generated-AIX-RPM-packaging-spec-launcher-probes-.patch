@@ -1,6 +1,6 @@
-From 92cb0d29e055ca2558e19956cea518400fc990c5 Mon Sep 17 00:00:00 2001
+From 67446833f34345d74c9da495dbbd28a96d62adfa Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Tue, 13 Oct 2026 16:39:27 +0200
+Date: Tue, 13 Oct 2026 18:44:14 +0200
 Subject: [PATCH 4/4] [AI generated] AIX: RPM packaging (spec, launcher),
  probes and check tools
 
@@ -18,31 +18,33 @@ Subject: [PATCH 4/4] [AI generated] AIX: RPM packaging (spec, launcher),
 * tools/aix/shim/strftime_l_shim.c: LDR_PRELOAD64 shim used only for the
   diagnosis of the 7.2-on-7.1 failure.
 ---
- tools/aix/ansi_render.pl                      | 98 +++++++++++++++++++
- tools/aix/check_imports.pl                    | 44 +++++++++
- tools/aix/probes/cxxrt_probe.cpp              | 46 +++++++++
- tools/aix/probes/libcall_probe.c              | 19 ++++
- tools/aix/probes/perfstat_layout/layout.cpp   | 29 ++++++
- tools/aix/probes/perfstat_layout/preamble.h   | 39 ++++++++
- .../probes/perfstat_layout/stub/sys/corral.h  |  1 +
- .../perfstat_layout/stub/sys/corralid.h       |  1 +
- .../probes/perfstat_layout/stub/sys/rset.h    |  1 +
- tools/aix/probes/perfstat_size_probe.c        | 59 +++++++++++
- tools/aix/probes/perfstat_sizes.cpp           | 67 +++++++++++++
- tools/aix/probes/pthread_probe.c              | 36 +++++++
- tools/aix/probes/rusage_probe.c               | 64 ++++++++++++
- tools/aix/rpm/README.AIX                      | 66 +++++++++++++
- tools/aix/rpm/btop.sh                         | 16 +++
- tools/aix/rpm/btop.spec                       | 84 ++++++++++++++++
- tools/aix/rpm/build_rpm.pl                    | 89 +++++++++++++++++
- tools/aix/shim/strftime_l_shim.c              | 33 +++++++
- tools/aix/shim/strftime_l_shim.exp            |  1 +
- 19 files changed, 793 insertions(+)
+ tools/aix/ansi_render.pl                      |  98 ++++++
+ tools/aix/check_imports.pl                    |  44 +++
+ tools/aix/probes/cxxrt_probe.cpp              |  46 +++
+ tools/aix/probes/libcall_probe.c              |  19 +
+ tools/aix/probes/perfstat_layout/layout.cpp   |  29 ++
+ .../perfstat_layout/offsets_5.3-7.3.txt       | 330 ++++++++++++++++++
+ tools/aix/probes/perfstat_layout/preamble.h   |  39 +++
+ .../probes/perfstat_layout/stub/sys/corral.h  |   1 +
+ .../perfstat_layout/stub/sys/corralid.h       |   1 +
+ .../probes/perfstat_layout/stub/sys/rset.h    |   1 +
+ tools/aix/probes/perfstat_size_probe.c        |  59 ++++
+ tools/aix/probes/perfstat_sizes.cpp           |  67 ++++
+ tools/aix/probes/pthread_probe.c              |  36 ++
+ tools/aix/probes/rusage_probe.c               |  64 ++++
+ tools/aix/rpm/README.AIX                      |  72 ++++
+ tools/aix/rpm/btop.sh                         |  24 ++
+ tools/aix/rpm/btop.spec                       |  84 +++++
+ tools/aix/rpm/build_rpm.pl                    |  89 +++++
+ tools/aix/shim/strftime_l_shim.c              |  33 ++
+ tools/aix/shim/strftime_l_shim.exp            |   1 +
+ 20 files changed, 1137 insertions(+)
  create mode 100755 tools/aix/ansi_render.pl
  create mode 100755 tools/aix/check_imports.pl
  create mode 100644 tools/aix/probes/cxxrt_probe.cpp
  create mode 100644 tools/aix/probes/libcall_probe.c
  create mode 100644 tools/aix/probes/perfstat_layout/layout.cpp
+ create mode 100644 tools/aix/probes/perfstat_layout/offsets_5.3-7.3.txt
  create mode 100644 tools/aix/probes/perfstat_layout/preamble.h
  create mode 100644 tools/aix/probes/perfstat_layout/stub/sys/corral.h
  create mode 100644 tools/aix/probes/perfstat_layout/stub/sys/corralid.h
@@ -324,6 +326,342 @@ index 0000000..7f20785
 +	if constexpr (requires { sizeof(perfstat_logicalvolume_t); }) { OFF(perfstat_logicalvolume_t, name); OFF(perfstat_logicalvolume_t, kbreads); OFF(perfstat_logicalvolume_t, kbwrites); }
 +	return 0;
 +}
+diff --git a/tools/aix/probes/perfstat_layout/offsets_5.3-7.3.txt b/tools/aix/probes/perfstat_layout/offsets_5.3-7.3.txt
+new file mode 100644
+index 0000000..78dd911
+--- /dev/null
++++ b/tools/aix/probes/perfstat_layout/offsets_5.3-7.3.txt
+@@ -0,0 +1,330 @@
++# Offsets of the libperfstat fields btop reads, per header version (LP64). Produced by layout.cpp in this directory
++# (+ preamble.h, stub/) from the libperfstat.h of each AIX release named below; computed with clang -m64 on Linux; the IBM headers are not included.
++
++== libperfstat_5_3_9_7.h (namespace)
++sizeof: cpu_total=624 cpu=528 memory_total=208 disk=472 netinterface=208 logicalvolume=216
++  perfstat_cpu_total_t   ncpus          off=   0 size=4
++  perfstat_cpu_total_t   description    off=   8 size=64
++  perfstat_cpu_total_t   processorHZ    off=  72 size=8
++  perfstat_cpu_total_t   loadavg        off= 200 size=24
++  perfstat_cpu_total_t   user           off=  80 size=8
++  perfstat_cpu_total_t   sys            off=  88 size=8
++  perfstat_cpu_total_t   idle           off=  96 size=8
++  perfstat_cpu_total_t   wait           off= 104 size=8
++  perfstat_cpu_total_t   lbolt          off= 192 size=8
++  perfstat_cpu_t         name           off=   0 size=64
++  perfstat_cpu_t         user           off=  64 size=8
++  perfstat_cpu_t         sys            off=  72 size=8
++  perfstat_cpu_t         idle           off=  80 size=8
++  perfstat_cpu_t         wait           off=  88 size=8
++  perfstat_memory_total_t real_total     off=   8 size=8
++  perfstat_memory_total_t real_free      off=  16 size=8
++  perfstat_memory_total_t real_inuse     off=  32 size=8
++  perfstat_memory_total_t numperm        off= 112 size=8
++  perfstat_memory_total_t pgsp_total     off= 120 size=8
++  perfstat_memory_total_t pgsp_free      off= 128 size=8
++  perfstat_memory_total_t real_avail     (not in this version)
++  perfstat_disk_t        name           off=   0 size=64
++  perfstat_disk_t        description    off=  64 size=64
++  perfstat_disk_t        vgname         off= 128 size=64
++  perfstat_disk_t        size           off= 192 size=8
++  perfstat_disk_t        free           off= 200 size=8
++  perfstat_disk_t        bsize          off= 208 size=8
++  perfstat_disk_t        xfers          off= 224 size=8
++  perfstat_disk_t        wblks          off= 232 size=8
++  perfstat_disk_t        rblks          off= 240 size=8
++  perfstat_disk_t        qdepth         off= 248 size=8
++  perfstat_disk_t        time           off= 256 size=8
++  perfstat_netinterface_t name           off=   0 size=64
++  perfstat_netinterface_t ibytes         off= 152 size=8
++  perfstat_netinterface_t obytes         off= 176 size=8
++  perfstat_logicalvolume_t name           off=   0 size=64
++  perfstat_logicalvolume_t kbreads        off= 200 size=8
++  perfstat_logicalvolume_t kbwrites       off= 208 size=8
++
++== libperfstat_6_1_2_8.h (namespace)
++sizeof: cpu_total=624 cpu=528 memory_total=208 disk=472 netinterface=208 logicalvolume=216
++  perfstat_cpu_total_t   ncpus          off=   0 size=4
++  perfstat_cpu_total_t   description    off=   8 size=64
++  perfstat_cpu_total_t   processorHZ    off=  72 size=8
++  perfstat_cpu_total_t   loadavg        off= 200 size=24
++  perfstat_cpu_total_t   user           off=  80 size=8
++  perfstat_cpu_total_t   sys            off=  88 size=8
++  perfstat_cpu_total_t   idle           off=  96 size=8
++  perfstat_cpu_total_t   wait           off= 104 size=8
++  perfstat_cpu_total_t   lbolt          off= 192 size=8
++  perfstat_cpu_t         name           off=   0 size=64
++  perfstat_cpu_t         user           off=  64 size=8
++  perfstat_cpu_t         sys            off=  72 size=8
++  perfstat_cpu_t         idle           off=  80 size=8
++  perfstat_cpu_t         wait           off=  88 size=8
++  perfstat_memory_total_t real_total     off=   8 size=8
++  perfstat_memory_total_t real_free      off=  16 size=8
++  perfstat_memory_total_t real_inuse     off=  32 size=8
++  perfstat_memory_total_t numperm        off= 112 size=8
++  perfstat_memory_total_t pgsp_total     off= 120 size=8
++  perfstat_memory_total_t pgsp_free      off= 128 size=8
++  perfstat_memory_total_t real_avail     (not in this version)
++  perfstat_disk_t        name           off=   0 size=64
++  perfstat_disk_t        description    off=  64 size=64
++  perfstat_disk_t        vgname         off= 128 size=64
++  perfstat_disk_t        size           off= 192 size=8
++  perfstat_disk_t        free           off= 200 size=8
++  perfstat_disk_t        bsize          off= 208 size=8
++  perfstat_disk_t        xfers          off= 224 size=8
++  perfstat_disk_t        wblks          off= 232 size=8
++  perfstat_disk_t        rblks          off= 240 size=8
++  perfstat_disk_t        qdepth         off= 248 size=8
++  perfstat_disk_t        time           off= 256 size=8
++  perfstat_netinterface_t name           off=   0 size=64
++  perfstat_netinterface_t ibytes         off= 152 size=8
++  perfstat_netinterface_t obytes         off= 176 size=8
++  perfstat_logicalvolume_t name           off=   0 size=64
++  perfstat_logicalvolume_t kbreads        off= 200 size=8
++  perfstat_logicalvolume_t kbwrites       off= 208 size=8
++
++== libperfstat_6_1_7_0.h (namespace)
++sizeof: cpu_total=696 cpu=616 memory_total=352 disk=496 netinterface=224 logicalvolume=224
++  perfstat_cpu_total_t   ncpus          off=   0 size=4
++  perfstat_cpu_total_t   description    off=   8 size=64
++  perfstat_cpu_total_t   processorHZ    off=  72 size=8
++  perfstat_cpu_total_t   loadavg        off= 200 size=24
++  perfstat_cpu_total_t   user           off=  80 size=8
++  perfstat_cpu_total_t   sys            off=  88 size=8
++  perfstat_cpu_total_t   idle           off=  96 size=8
++  perfstat_cpu_total_t   wait           off= 104 size=8
++  perfstat_cpu_total_t   lbolt          off= 192 size=8
++  perfstat_cpu_t         name           off=   0 size=64
++  perfstat_cpu_t         user           off=  64 size=8
++  perfstat_cpu_t         sys            off=  72 size=8
++  perfstat_cpu_t         idle           off=  80 size=8
++  perfstat_cpu_t         wait           off=  88 size=8
++  perfstat_memory_total_t real_total     off=   8 size=8
++  perfstat_memory_total_t real_free      off=  16 size=8
++  perfstat_memory_total_t real_inuse     off=  32 size=8
++  perfstat_memory_total_t numperm        off= 112 size=8
++  perfstat_memory_total_t pgsp_total     off= 120 size=8
++  perfstat_memory_total_t pgsp_free      off= 128 size=8
++  perfstat_memory_total_t real_avail     off= 328 size=8
++  perfstat_disk_t        name           off=   0 size=64
++  perfstat_disk_t        description    off=  64 size=64
++  perfstat_disk_t        vgname         off= 128 size=64
++  perfstat_disk_t        size           off= 192 size=8
++  perfstat_disk_t        free           off= 200 size=8
++  perfstat_disk_t        bsize          off= 208 size=8
++  perfstat_disk_t        xfers          off= 224 size=8
++  perfstat_disk_t        wblks          off= 232 size=8
++  perfstat_disk_t        rblks          off= 240 size=8
++  perfstat_disk_t        qdepth         off= 248 size=8
++  perfstat_disk_t        time           off= 256 size=8
++  perfstat_netinterface_t name           off=   0 size=64
++  perfstat_netinterface_t ibytes         off= 152 size=8
++  perfstat_netinterface_t obytes         off= 176 size=8
++  perfstat_logicalvolume_t name           off=   0 size=64
++  perfstat_logicalvolume_t kbreads        off= 200 size=8
++  perfstat_logicalvolume_t kbwrites       off= 208 size=8
++
++== libperfstat_6_1_8_0.h (namespace)
++sizeof: cpu_total=696 cpu=624 memory_total=352 disk=496 netinterface=240 logicalvolume=224
++  perfstat_cpu_total_t   ncpus          off=   0 size=4
++  perfstat_cpu_total_t   description    off=   8 size=64
++  perfstat_cpu_total_t   processorHZ    off=  72 size=8
++  perfstat_cpu_total_t   loadavg        off= 200 size=24
++  perfstat_cpu_total_t   user           off=  80 size=8
++  perfstat_cpu_total_t   sys            off=  88 size=8
++  perfstat_cpu_total_t   idle           off=  96 size=8
++  perfstat_cpu_total_t   wait           off= 104 size=8
++  perfstat_cpu_total_t   lbolt          off= 192 size=8
++  perfstat_cpu_t         name           off=   0 size=64
++  perfstat_cpu_t         user           off=  64 size=8
++  perfstat_cpu_t         sys            off=  72 size=8
++  perfstat_cpu_t         idle           off=  80 size=8
++  perfstat_cpu_t         wait           off=  88 size=8
++  perfstat_memory_total_t real_total     off=   8 size=8
++  perfstat_memory_total_t real_free      off=  16 size=8
++  perfstat_memory_total_t real_inuse     off=  32 size=8
++  perfstat_memory_total_t numperm        off= 112 size=8
++  perfstat_memory_total_t pgsp_total     off= 120 size=8
++  perfstat_memory_total_t pgsp_free      off= 128 size=8
++  perfstat_memory_total_t real_avail     off= 328 size=8
++  perfstat_disk_t        name           off=   0 size=64
++  perfstat_disk_t        description    off=  64 size=64
++  perfstat_disk_t        vgname         off= 128 size=64
++  perfstat_disk_t        size           off= 192 size=8
++  perfstat_disk_t        free           off= 200 size=8
++  perfstat_disk_t        bsize          off= 208 size=8
++  perfstat_disk_t        xfers          off= 224 size=8
++  perfstat_disk_t        wblks          off= 232 size=8
++  perfstat_disk_t        rblks          off= 240 size=8
++  perfstat_disk_t        qdepth         off= 248 size=8
++  perfstat_disk_t        time           off= 256 size=8
++  perfstat_netinterface_t name           off=   0 size=64
++  perfstat_netinterface_t ibytes         off= 152 size=8
++  perfstat_netinterface_t obytes         off= 176 size=8
++  perfstat_logicalvolume_t name           off=   0 size=64
++  perfstat_logicalvolume_t kbreads        off= 200 size=8
++  perfstat_logicalvolume_t kbwrites       off= 208 size=8
++
++== libperfstat_7_1_0_1.h (namespace)
++sizeof: cpu_total=696 cpu=624 memory_total=352 disk=496 netinterface=224 logicalvolume=224
++  perfstat_cpu_total_t   ncpus          off=   0 size=4
++  perfstat_cpu_total_t   description    off=   8 size=64
++  perfstat_cpu_total_t   processorHZ    off=  72 size=8
++  perfstat_cpu_total_t   loadavg        off= 200 size=24
++  perfstat_cpu_total_t   user           off=  80 size=8
++  perfstat_cpu_total_t   sys            off=  88 size=8
++  perfstat_cpu_total_t   idle           off=  96 size=8
++  perfstat_cpu_total_t   wait           off= 104 size=8
++  perfstat_cpu_total_t   lbolt          off= 192 size=8
++  perfstat_cpu_t         name           off=   0 size=64
++  perfstat_cpu_t         user           off=  64 size=8
++  perfstat_cpu_t         sys            off=  72 size=8
++  perfstat_cpu_t         idle           off=  80 size=8
++  perfstat_cpu_t         wait           off=  88 size=8
++  perfstat_memory_total_t real_total     off=   8 size=8
++  perfstat_memory_total_t real_free      off=  16 size=8
++  perfstat_memory_total_t real_inuse     off=  32 size=8
++  perfstat_memory_total_t numperm        off= 112 size=8
++  perfstat_memory_total_t pgsp_total     off= 120 size=8
++  perfstat_memory_total_t pgsp_free      off= 128 size=8
++  perfstat_memory_total_t real_avail     off= 328 size=8
++  perfstat_disk_t        name           off=   0 size=64
++  perfstat_disk_t        description    off=  64 size=64
++  perfstat_disk_t        vgname         off= 128 size=64
++  perfstat_disk_t        size           off= 192 size=8
++  perfstat_disk_t        free           off= 200 size=8
++  perfstat_disk_t        bsize          off= 208 size=8
++  perfstat_disk_t        xfers          off= 224 size=8
++  perfstat_disk_t        wblks          off= 232 size=8
++  perfstat_disk_t        rblks          off= 240 size=8
++  perfstat_disk_t        qdepth         off= 248 size=8
++  perfstat_disk_t        time           off= 256 size=8
++  perfstat_netinterface_t name           off=   0 size=64
++  perfstat_netinterface_t ibytes         off= 152 size=8
++  perfstat_netinterface_t obytes         off= 176 size=8
++  perfstat_logicalvolume_t name           off=   0 size=64
++  perfstat_logicalvolume_t kbreads        off= 200 size=8
++  perfstat_logicalvolume_t kbwrites       off= 208 size=8
++
++== libperfstat_7_1_1_1.h (namespace)
++sizeof: cpu_total=696 cpu=624 memory_total=352 disk=496 netinterface=224 logicalvolume=224
++  perfstat_cpu_total_t   ncpus          off=   0 size=4
++  perfstat_cpu_total_t   description    off=   8 size=64
++  perfstat_cpu_total_t   processorHZ    off=  72 size=8
++  perfstat_cpu_total_t   loadavg        off= 200 size=24
++  perfstat_cpu_total_t   user           off=  80 size=8
++  perfstat_cpu_total_t   sys            off=  88 size=8
++  perfstat_cpu_total_t   idle           off=  96 size=8
++  perfstat_cpu_total_t   wait           off= 104 size=8
++  perfstat_cpu_total_t   lbolt          off= 192 size=8
++  perfstat_cpu_t         name           off=   0 size=64
++  perfstat_cpu_t         user           off=  64 size=8
++  perfstat_cpu_t         sys            off=  72 size=8
++  perfstat_cpu_t         idle           off=  80 size=8
++  perfstat_cpu_t         wait           off=  88 size=8
++  perfstat_memory_total_t real_total     off=   8 size=8
++  perfstat_memory_total_t real_free      off=  16 size=8
++  perfstat_memory_total_t real_inuse     off=  32 size=8
++  perfstat_memory_total_t numperm        off= 112 size=8
++  perfstat_memory_total_t pgsp_total     off= 120 size=8
++  perfstat_memory_total_t pgsp_free      off= 128 size=8
++  perfstat_memory_total_t real_avail     off= 328 size=8
++  perfstat_disk_t        name           off=   0 size=64
++  perfstat_disk_t        description    off=  64 size=64
++  perfstat_disk_t        vgname         off= 128 size=64
++  perfstat_disk_t        size           off= 192 size=8
++  perfstat_disk_t        free           off= 200 size=8
++  perfstat_disk_t        bsize          off= 208 size=8
++  perfstat_disk_t        xfers          off= 224 size=8
++  perfstat_disk_t        wblks          off= 232 size=8
++  perfstat_disk_t        rblks          off= 240 size=8
++  perfstat_disk_t        qdepth         off= 248 size=8
++  perfstat_disk_t        time           off= 256 size=8
++  perfstat_netinterface_t name           off=   0 size=64
++  perfstat_netinterface_t ibytes         off= 152 size=8
++  perfstat_netinterface_t obytes         off= 176 size=8
++  perfstat_logicalvolume_t name           off=   0 size=64
++  perfstat_logicalvolume_t kbreads        off= 200 size=8
++  perfstat_logicalvolume_t kbwrites       off= 208 size=8
++
++== libperfstat_7_2_5_201.h
++sizeof: cpu_total=696 cpu=640 memory_total=352 disk=496 netinterface=240 logicalvolume=224
++  perfstat_cpu_total_t   ncpus          off=   0 size=4
++  perfstat_cpu_total_t   description    off=   8 size=64
++  perfstat_cpu_total_t   processorHZ    off=  72 size=8
++  perfstat_cpu_total_t   loadavg        off= 200 size=24
++  perfstat_cpu_total_t   user           off=  80 size=8
++  perfstat_cpu_total_t   sys            off=  88 size=8
++  perfstat_cpu_total_t   idle           off=  96 size=8
++  perfstat_cpu_total_t   wait           off= 104 size=8
++  perfstat_cpu_total_t   lbolt          off= 192 size=8
++  perfstat_cpu_t         name           off=   0 size=64
++  perfstat_cpu_t         user           off=  64 size=8
++  perfstat_cpu_t         sys            off=  72 size=8
++  perfstat_cpu_t         idle           off=  80 size=8
++  perfstat_cpu_t         wait           off=  88 size=8
++  perfstat_memory_total_t real_total     off=   8 size=8
++  perfstat_memory_total_t real_free      off=  16 size=8
++  perfstat_memory_total_t real_inuse     off=  32 size=8
++  perfstat_memory_total_t numperm        off= 112 size=8
++  perfstat_memory_total_t pgsp_total     off= 120 size=8
++  perfstat_memory_total_t pgsp_free      off= 128 size=8
++  perfstat_memory_total_t real_avail     off= 328 size=8
++  perfstat_disk_t        name           off=   0 size=64
++  perfstat_disk_t        description    off=  64 size=64
++  perfstat_disk_t        vgname         off= 128 size=64
++  perfstat_disk_t        size           off= 192 size=8
++  perfstat_disk_t        free           off= 200 size=8
++  perfstat_disk_t        bsize          off= 208 size=8
++  perfstat_disk_t        xfers          off= 224 size=8
++  perfstat_disk_t        wblks          off= 232 size=8
++  perfstat_disk_t        rblks          off= 240 size=8
++  perfstat_disk_t        qdepth         off= 248 size=8
++  perfstat_disk_t        time           off= 256 size=8
++  perfstat_netinterface_t name           off=   0 size=64
++  perfstat_netinterface_t ibytes         off= 152 size=8
++  perfstat_netinterface_t obytes         off= 176 size=8
++  perfstat_logicalvolume_t name           off=   0 size=64
++  perfstat_logicalvolume_t kbreads        off= 200 size=8
++  perfstat_logicalvolume_t kbwrites       off= 208 size=8
++
++== libperfstat_7_3_1_0.h
++sizeof: cpu_total=696 cpu=640 memory_total=352 disk=496 netinterface=240 logicalvolume=224
++  perfstat_cpu_total_t   ncpus          off=   0 size=4
++  perfstat_cpu_total_t   description    off=   8 size=64
++  perfstat_cpu_total_t   processorHZ    off=  72 size=8
++  perfstat_cpu_total_t   loadavg        off= 200 size=24
++  perfstat_cpu_total_t   user           off=  80 size=8
++  perfstat_cpu_total_t   sys            off=  88 size=8
++  perfstat_cpu_total_t   idle           off=  96 size=8
++  perfstat_cpu_total_t   wait           off= 104 size=8
++  perfstat_cpu_total_t   lbolt          off= 192 size=8
++  perfstat_cpu_t         name           off=   0 size=64
++  perfstat_cpu_t         user           off=  64 size=8
++  perfstat_cpu_t         sys            off=  72 size=8
++  perfstat_cpu_t         idle           off=  80 size=8
++  perfstat_cpu_t         wait           off=  88 size=8
++  perfstat_memory_total_t real_total     off=   8 size=8
++  perfstat_memory_total_t real_free      off=  16 size=8
++  perfstat_memory_total_t real_inuse     off=  32 size=8
++  perfstat_memory_total_t numperm        off= 112 size=8
++  perfstat_memory_total_t pgsp_total     off= 120 size=8
++  perfstat_memory_total_t pgsp_free      off= 128 size=8
++  perfstat_memory_total_t real_avail     off= 328 size=8
++  perfstat_disk_t        name           off=   0 size=64
++  perfstat_disk_t        description    off=  64 size=64
++  perfstat_disk_t        vgname         off= 128 size=64
++  perfstat_disk_t        size           off= 192 size=8
++  perfstat_disk_t        free           off= 200 size=8
++  perfstat_disk_t        bsize          off= 208 size=8
++  perfstat_disk_t        xfers          off= 224 size=8
++  perfstat_disk_t        wblks          off= 232 size=8
++  perfstat_disk_t        rblks          off= 240 size=8
++  perfstat_disk_t        qdepth         off= 248 size=8
++  perfstat_disk_t        time           off= 256 size=8
++  perfstat_netinterface_t name           off=   0 size=64
++  perfstat_netinterface_t ibytes         off= 152 size=8
++  perfstat_netinterface_t obytes         off= 176 size=8
++  perfstat_logicalvolume_t name           off=   0 size=64
++  perfstat_logicalvolume_t kbreads        off= 200 size=8
++  perfstat_logicalvolume_t kbwrites       off= 208 size=8
 diff --git a/tools/aix/probes/perfstat_layout/preamble.h b/tools/aix/probes/perfstat_layout/preamble.h
 new file mode 100644
 index 0000000..3fcede6
@@ -642,10 +980,10 @@ index 0000000..c155b52
 +}
 diff --git a/tools/aix/rpm/README.AIX b/tools/aix/rpm/README.AIX
 new file mode 100644
-index 0000000..6a9c2ee
+index 0000000..06b9854
 --- /dev/null
 +++ b/tools/aix/rpm/README.AIX
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,72 @@
 +btop on IBM AIX
 +===============
 +
@@ -673,12 +1011,18 @@ index 0000000..6a9c2ee
 +    btop                      # /usr/bin/btop -> /opt/btop/bin/btop
 +    rpm -e btop
 +
-+Tar archive (rpm.rte 3.0.5, or without root into any directory). It contains
++Tar archive (rpm.rte 3.0.5). It contains
 +only opt/btop, so nothing outside that directory is touched:
 +
 +    cd / && gzip -dc btop-<version>-<release>.aix6.1.ppc.tar.gz | tar -xf -
 +    ln -s /opt/btop/bin/btop /usr/bin/btop     # optional
 +    rm -rf /opt/btop /usr/bin/btop             # uninstall
++
++Without root, unpack into any directory and start the launcher there; it
++follows symlinks and runs the btop.bin next to it:
++
++    mkdir ~/btop && cd ~/btop && gzip -dc /path/to/btop-<version>-<release>.aix6.1.ppc.tar.gz | tar -xf -
++    ~/btop/opt/btop/bin/btop
 +
 +A 256-colour terminal (xterm-256color, PuTTY with "xterm-256color") gives
 +the intended look; aixterm and vt100 work with the "tty" theme or
@@ -708,22 +1052,24 @@ index 0000000..6a9c2ee
 +Built on an AIX 7.2 host with IBM Open XL C/C++ 17.1.3 against an AIX 6.1
 +sysroot and a statically linked libc++ 19.1.7 (the C library functions AIX 6.1
 +lacks, aligned_alloc and the POSIX 2008 locale calls, are replaced inside that
-+runtime). Source: the aix branch of the
-+btop fork published with this package; the upstream base commit and the
-+patch series are listed in that repository. `btop --version` prints the
++runtime). Source: branch aix-public of the fork https://github.com/mawelo/btop;
++the patch series, the upstream base commit and the signed release files are
++in https://github.com/mawelo/aix-btop. `btop --version` prints the
 +commit the binary was built from.
 diff --git a/tools/aix/rpm/btop.sh b/tools/aix/rpm/btop.sh
 new file mode 100644
-index 0000000..5bc1b50
+index 0000000..b2e16c7
 --- /dev/null
 +++ b/tools/aix/rpm/btop.sh
-@@ -0,0 +1,16 @@
+@@ -0,0 +1,24 @@
 +#!/bin/sh
 +# btop launcher for AIX (project btop-aix, 2026-10-12)
 +# Installed as /opt/btop/bin/btop by the btop RPM; /usr/bin/btop points here.
 +# Why: AIX hosts rarely have a UTF-8 locale installed and btop refuses to start
 +# without one unless --force-utf is given. The launcher adds that option when no
 +# UTF-8 locale is active and sets TERM=xterm-256color when TERM is empty.
++# btop.bin is taken from the launcher's own directory after following symlinks,
++# so a tree unpacked anywhere (tar, without root) starts its own binary.
 +# All arguments are passed on unchanged to the real binary.
 +case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
 +	*[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) ;;
@@ -733,10 +1079,16 @@ index 0000000..5bc1b50
 +	TERM=xterm-256color
 +	export TERM
 +fi
-+exec /opt/btop/bin/btop.bin "$@"
++self=$0 n=0
++while [ -h "$self" ] && [ $n -lt 16 ]; do
++	link=$(ls -ld "$self" | sed 's/.* -> //')
++	case $link in /*) self=$link ;; *) self=$(dirname "$self")/$link ;; esac
++	n=$((n + 1))
++done
++exec "$(dirname "$self")/btop.bin" "$@"
 diff --git a/tools/aix/rpm/btop.spec b/tools/aix/rpm/btop.spec
 new file mode 100644
-index 0000000..da65087
+index 0000000..6ddbdfe
 --- /dev/null
 +++ b/tools/aix/rpm/btop.spec
 @@ -0,0 +1,84 @@
@@ -788,8 +1140,8 @@ index 0000000..da65087
 +the per user configuration in ~/.config/btop.
 +
 +%pre
-+# refuse to overwrite a foreign /usr/bin/btop (AIX Toolbox package or a local build); ours is a symlink to /opt/btop/bin/btop
-+if [ -e /usr/bin/btop ] && [ "$(ls -ld /usr/bin/btop 2>/dev/null | awk '{print $NF}')" != /opt/btop/bin/btop ]; then
++# refuse to overwrite a foreign /usr/bin/btop (AIX Toolbox package, a local build, also a dangling symlink); ours is a symlink to /opt/btop/bin/btop
++if { [ -e /usr/bin/btop ] || [ -L /usr/bin/btop ]; } && [ "$(ls -ld /usr/bin/btop 2>/dev/null | awk '{print $NF}')" != /opt/btop/bin/btop ]; then
 +	echo "btop: /usr/bin/btop exists and is not the symlink of this package; remove or rename it first" >&2
 +	exit 1
 +fi
@@ -826,7 +1178,7 @@ index 0000000..da65087
 +- AIX port of btop: perfstat, mntctl, getprocs64; static libc++ built against AIX 6.1, one package for 6.1 TL7 to 7.3
 diff --git a/tools/aix/rpm/build_rpm.pl b/tools/aix/rpm/build_rpm.pl
 new file mode 100644
-index 0000000..8671579
+index 0000000..6b5eb66
 --- /dev/null
 +++ b/tools/aix/rpm/build_rpm.pl
 @@ -0,0 +1,89 @@
@@ -848,7 +1200,7 @@ index 0000000..8671579
 +#           ein nacktes "aix" lehnt es ab ("intended for a different operating system").
 +#           Laeuft auf AIX mit rpm.rte 4.x (rpmbuild) und dem System-Perl; keine CPAN-Module.
 +# Ausgabe : <out>/btop-<ver>-<rel>.<os>.ppc.rpm, <out>/btop-<ver>-<rel>.<os>.ppc.tar.gz,
-+#           <out>/rpm-info.txt (rpm -qpi/-qpl/--requires, cksum). rc 0 nur bei vollstaendigem Lauf.
++#           <out>/rpm-info.txt (rpm -qpi/-qpl/--requires; keine Pruefsumme, siehe unten). rc 0 nur bei vollstaendigem Lauf.
 +use strict;
 +use warnings;
 +use Getopt::Long;
@@ -915,8 +1267,8 @@ index 0000000..8671579
 +
 +# 4. Nachweis
 +my $info = "$out/rpm-info.txt";
-+# cksum with base names only: the build directory is an internal path and does not belong into the published file
-+run('sh', '-c', "{ rpm -qpi '$rpm'; echo; rpm -qp --requires '$rpm'; echo; rpm -qpl '$rpm'; echo; cd '$out' && cksum '" . basename($rpm) . "' '" . basename($tar) . "'; } > '$info' 2>&1");
++# no checksums here: the RPM is signed later, which changes its checksum; SHA256SUMS of the release is authoritative
++run('sh', '-c', "{ rpm -qpi '$rpm'; echo; rpm -qp --requires '$rpm'; echo; rpm -qpl '$rpm'; } > '$info' 2>&1");
 +open my $i, '<', $info or die; print <$i>; close $i;
 +print "\nOK: $rpm\n    $tar\n    $info\n";
 diff --git a/tools/aix/shim/strftime_l_shim.c b/tools/aix/shim/strftime_l_shim.c

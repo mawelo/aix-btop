@@ -1,6 +1,6 @@
-From 3bc655675cffffc413eb45d36bbb3dc161afd22f Mon Sep 17 00:00:00 2001
+From cd531dd02cef82113cc68940560091e2c92339c2 Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Tue, 13 Oct 2026 16:39:27 +0200
+Date: Tue, 13 Oct 2026 18:44:14 +0200
 Subject: [PATCH 2/4] [AI generated] AIX: build system (CMake, presets, IBM
  Open XL toolchain files, Makefile), README section
 

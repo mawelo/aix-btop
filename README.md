@@ -3,11 +3,16 @@
 Patches that port [btop](https://github.com/aristocratos/btop) (resource monitor for the
 terminal) to IBM AIX, and a ready-to-install package for AIX 6.1 TL7 up to 7.3.
 
-| Directory | Content |
+![btop on AIX 7.1 (POWER9, 32 logical CPUs, eight busy loops); network address and process names pixelated](img/btop-aix.png)
+
+| Where | Content |
 |---|---|
+| [Releases](https://github.com/mawelo/aix-btop/releases) | `btop-<version>-<release>.aix6.1.ppc.rpm` (signed) and the same tree as `.tar.gz`, with `SHA256SUMS` + `SHA256SUMS.asc` (one package for AIX 6.1 TL7 to 7.3; "aix6.1" is the minimum release, rpm on 7.1 to 7.3 accepts it through its OS compatibility table) |
+| [`aix-public`](https://github.com/mawelo/btop/tree/aix-public) branch of the fork `mawelo/btop` | the same four patches as commits on top of the upstream base; `btop --version` of the package names a commit of this branch |
 | `patches/` | Patch series for the upstream repository (`git am`), base commit in `patches/BASE-COMMIT.txt` |
+| `rpm/` | `rpm-info.txt`, `BUILD.txt`, `SHA256SUMS` + `SHA256SUMS.asc` of the current release |
+| `img/` | screenshot (AIX 7100-05) |
 | `KEYS` | public key that signs the RPM and `SHA256SUMS` |
-| `rpm/` | `btop-<version>-<release>.aix6.1.ppc.rpm` (signed), the same tree as `.tar.gz`, `rpm-info.txt`, `BUILD.txt`, `SHA256SUMS` + `SHA256SUMS.asc` (one package for AIX 6.1 TL7 to 7.3; "aix6.1" is the minimum release, rpm on 7.1 to 7.3 accepts it through its OS compatibility table) |
 
 ## Patches
 
@@ -25,6 +30,9 @@ git checkout d3389d74e88644c50907e84314c3c7c973ba5be9
 git am /path/to/aix-btop/patches/*.patch
 ```
 
+The result is identical to the `aix-public` branch of the fork, which can be used directly instead:
+`git clone -b aix-public https://github.com/mawelo/btop`.
+
 | Patch | Content |
 |---|---|
 | 0001 | Platform layer `src/aix/`: libperfstat (CPU, memory, disks, network), `mntctl`/`statvfs` (file systems), `getprocs64`/`getargs` (processes), `getifaddrs` replacement, executable path lookup; small shared-code changes (`pthread_join`, `_Exit`, AIX signal table) |
@@ -34,7 +42,7 @@ git am /path/to/aix-btop/patches/*.patch
 
 The patches are meant to change no behaviour on other platforms: the code changes outside `src/aix/`, `cmake/`
 and `tools/aix/` are behind `_AIX` or `CMAKE_SYSTEM_NAME STREQUAL "AIX"`. Two build-system changes are
-unconditional but neutral: the Makefile collects sources with `1000 4 20 24 27 30 44 46 109 121 132 133 135 144 157 992 1000wildcard)` instead of `find -maxdepth`, and
+unconditional but neutral: the Makefile collects sources with `$(wildcard ...)` instead of `find -maxdepth`, and
 CMake gains the cache variable `BTOP_GIT_COMMIT` (used only when set).
 
 ## Building
@@ -61,12 +69,13 @@ The 7.1 build stays in the tree as a build check but is not shipped.
 |---|---|---|---|
 | `rpm/btop-<version>-<release>.aix6.1.ppc.rpm` (and the same tree as `.tar.gz`) | AIX 6100-09 sysroot, static libc++ 19 | see the matrix below | AIX 6.1 TL7 and later, 7.1, 7.2, 7.3 (every technology level), because of the reasons given below |
 
-Test matrix (one run each, 2026-10-12; "load" = two single-threaded busy loops started next to btop):
+Test matrix (one run each, 2026-10-12, with the code of release 1; "load" = two single-threaded busy loops
+started next to btop):
 
 | AIX level | rpm.rte | Installed via | Started | Under load | Removed again |
 |---|---|---|---|---|---|
-| 6100-07-10 | n/a (non-root user) | tar, in a private directory | yes | yes | yes |
-| 6100-09-04 | n/a (non-root user) | tar, in a private directory | yes | yes | yes |
+| 6100-07-10 | n/a (non-root user) | tar, in a private directory | yes, `btop.bin --force-utf` directly | yes | yes |
+| 6100-09-04 | n/a (non-root user) | tar, in a private directory | yes, `btop.bin --force-utf` directly | yes | yes |
 | 7100-02-01 | 3.0.5 | tar; the RPM only passed `rpm -ivh --test` | yes | yes | yes |
 | 7100-05-03 | 4.13.0 | `rpm -ivh` | yes, through the launcher without `LANG` | no | `rpm -e`, no files left |
 | 7200-05-05 | 4.15.1 | `rpm -ivh` | yes | yes | `rpm -e`, no files left |
@@ -84,17 +93,20 @@ Why one binary is expected to cover all of them:
   `perfstat_netinterface_t` 208 / 224 / 240; `perfstat_cpu_total_t` 624 / 696; `perfstat_memory_total_t`
   208 / 352 (`real_avail` exists since 6.1.7); `perfstat_disk_t` 472 / 496; `perfstat_logicalvolume_t` 216 / 224.
   The highest offset btop reads is 88 in `perfstat_cpu_t`, 176 in `perfstat_netinterface_t`, 256 in
-  `perfstat_disk_t`, 224 in `perfstat_cpu_total_t` and 336 in `perfstat_memory_total_t`. The table was produced
-  with the generator in `tools/aix/probes/perfstat_layout/` (patch 0004) from the IBM headers of those releases.
-* libperfstat rejects a `sizeof_struct` larger than the structure it was built with (`EINVAL`). The binary
-  carries the 6.1.8 sizes and, on `EINVAL`, shrinks the size in steps of 8 bytes until the call succeeds;
-  fields beyond the accepted size read as zero. Measured: 6100-07 accepts 616 instead of 624 for
-  `perfstat_cpu_t` and 224 instead of 240 for `perfstat_netinterface_t`, 7100-02 accepts 616. A newer
-  library accepts the smaller size unchanged. This applies to all six calls above.
-* What the 6.1 C library lacks is replaced: `aligned_alloc` (missing before 6.1 TL9, hence the lower bound
-  6.1 TL7, the oldest level with `posix_memalign` and the other imports; TL6 and older were not examined)
-  and the POSIX 2008 locale calls inside the statically linked C++ runtime, `quick_exit` by `_Exit` in btop
-  itself. The binary imports only `libc.a`, `libpthreads.a` and `libperfstat.a`.
+  `perfstat_disk_t`, 208 in `perfstat_logicalvolume_t`, 224 in `perfstat_cpu_total_t` and 336 in
+  `perfstat_memory_total_t`. Header versions are the `libperfstat.h` levels 5.3.9.7, 6.1.2.8, 6.1.7.0, 6.1.8.0,
+  7.1.0.1, 7.1.1.1, 7.2.5.201 and 7.3.1.0 (shortened to three digits above), not technology levels. The table
+  is `tools/aix/probes/perfstat_layout/offsets_5.3-7.3.txt`, produced by the generator in the same directory
+  (patch 0004); the IBM headers themselves are not included.
+* libperfstat rejects a `sizeof_struct` larger than the structure it was built with (`EINVAL`). The binary is
+  built against the 6100-09 sysroot, whose header has the 6.1.8 sizes, and on `EINVAL` shrinks the size in
+  steps of 8 bytes until the call succeeds; fields beyond the accepted size read as zero. Measured: 6100-07
+  accepts 616 instead of 624 for `perfstat_cpu_t` and 224 instead of 240 for `perfstat_netinterface_t`,
+  7100-02 accepts 616. A newer library accepts the smaller size unchanged. This applies to all six calls above.
+* What the 6.1 C library lacks is replaced: `aligned_alloc` (missing before 6.1 TL9) by `posix_memalign`, and
+  the POSIX 2008 locale calls inside the statically linked C++ runtime. 6.1 TL7 is the oldest level examined:
+  its C library exports every symbol the binary imports; TL6 and older were not examined. btop itself calls
+  `_Exit` instead of `quick_exit`. The binary imports only `libc.a`, `libpthreads.a` and `libperfstat.a`.
 
 Requirements: `rpm.rte` 4.9.1.3 or newer (AIX Toolbox); `rpm.rte` 3.0.5 cannot install the package (it needs
 `rpmlib(PayloadFilesHavePrefix)`), use the tar archive there. `bos.perf.libperfstat`. No UTF-8 locale is
@@ -103,14 +115,18 @@ when `TERM` is empty. The RPM refuses to install over a `/usr/bin/btop` that is 
 
 ```sh
 # RPM
-rpm -ivh btop-1.4.7-1.aix6.1.ppc.rpm
+rpm -ivh btop-1.4.7-2.aix6.1.ppc.rpm
 btop                                   # /usr/bin/btop -> /opt/btop/bin/btop -> /opt/btop/bin/btop.bin
 rpm -e btop
 
-# tar (rpm.rte 3.0.5, or without root into any directory): the archive contains only opt/btop
-cd / && gzip -dc btop-1.4.7-1.aix6.1.ppc.tar.gz | tar -xf -
+# tar (rpm.rte 3.0.5): the archive contains only opt/btop
+cd / && gzip -dc btop-1.4.7-2.aix6.1.ppc.tar.gz | tar -xf -
 ln -s /opt/btop/bin/btop /usr/bin/btop   # optional
 rm -rf /opt/btop /usr/bin/btop           # uninstall
+
+# tar without root, into any directory
+mkdir ~/btop && cd ~/btop && gzip -dc /path/to/btop-1.4.7-2.aix6.1.ppc.tar.gz | tar -xf -
+~/btop/opt/btop/bin/btop                 # the launcher starts the btop.bin next to it (symlinks are followed)
 ```
 
 Layout: `/opt/btop/bin` (launcher and binary), `/opt/btop/share/btop/themes`, `/opt/btop/share/doc/btop`
@@ -140,7 +156,7 @@ with the one shown on the GitHub profile or in the release notes, not only with 
 ```sh
 # on AIX with rpm.rte 4.15 or newer (tested: 4.15.1 on 7200-05, 4.20.1 on 7300-04)
 rpm --import KEYS
-rpm -K btop-1.4.7-1.aix6.1.ppc.rpm          # "digests signatures OK"
+rpm -K btop-1.4.7-2.aix6.1.ppc.rpm          # "digests signatures OK"
 
 # anywhere with GnuPG
 gpg --import KEYS
@@ -151,7 +167,8 @@ sha256sum -c SHA256SUMS
 With rpm.rte 4.13 (tested on 7100-05) `rpm -K` reports "NOT OK" although `rpm -Kv` shows
 "Header V4 RSA/SHA512 Signature, key ID da7addd4: OK"; the old rpm cannot evaluate the additional signature
 tag. On such hosts verify `SHA256SUMS.asc` with GnuPG on any other machine and compare the SHA-256 sum.
-`rpm-info.txt` was written on the build host before signing and therefore shows `Signature: (none)`.
+`rpm-info.txt` was written on the build host before signing and therefore shows `Signature: (none)`;
+`SHA256SUMS` is the authoritative checksum list.
 
 ## Support and funding
 
