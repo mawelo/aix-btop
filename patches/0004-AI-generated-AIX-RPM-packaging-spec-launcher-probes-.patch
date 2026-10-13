@@ -1,0 +1,967 @@
+From 92cb0d29e055ca2558e19956cea518400fc990c5 Mon Sep 17 00:00:00 2001
+From: Martin Lonkwitz <mawelo@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 16:39:27 +0200
+Subject: [PATCH 4/4] [AI generated] AIX: RPM packaging (spec, launcher),
+ probes and check tools
+
+* tools/aix/rpm: btop.spec (layout /opt/btop, symlink /usr/bin/btop, MD5 file
+  digests and gzip payload so that rpm.rte 4.9 can read the package),
+  btop.sh launcher (adds --force-utf when no UTF-8 locale is active, defaults
+  TERM to xterm-256color), build_rpm.pl (stages the file tree once, builds RPM
+  and an equivalent tar archive, writes rpm-info.txt), README.AIX.
+* tools/aix/probes: perfstat_sizes.cpp (structure sizes across releases),
+  cxxrt_probe.cpp (C++23 runtime smoke test), pthread_probe.c (static mutex
+  initializer across releases), libcall_probe.c (___strlen64/___strcmp64).
+* tools/aix/check_imports.pl: imports of an XCOFF binary against the export
+  list of a target release.
+* tools/aix/ansi_render.pl: render a terminal recording as a text screen.
+* tools/aix/shim/strftime_l_shim.c: LDR_PRELOAD64 shim used only for the
+  diagnosis of the 7.2-on-7.1 failure.
+---
+ tools/aix/ansi_render.pl                      | 98 +++++++++++++++++++
+ tools/aix/check_imports.pl                    | 44 +++++++++
+ tools/aix/probes/cxxrt_probe.cpp              | 46 +++++++++
+ tools/aix/probes/libcall_probe.c              | 19 ++++
+ tools/aix/probes/perfstat_layout/layout.cpp   | 29 ++++++
+ tools/aix/probes/perfstat_layout/preamble.h   | 39 ++++++++
+ .../probes/perfstat_layout/stub/sys/corral.h  |  1 +
+ .../perfstat_layout/stub/sys/corralid.h       |  1 +
+ .../probes/perfstat_layout/stub/sys/rset.h    |  1 +
+ tools/aix/probes/perfstat_size_probe.c        | 59 +++++++++++
+ tools/aix/probes/perfstat_sizes.cpp           | 67 +++++++++++++
+ tools/aix/probes/pthread_probe.c              | 36 +++++++
+ tools/aix/probes/rusage_probe.c               | 64 ++++++++++++
+ tools/aix/rpm/README.AIX                      | 66 +++++++++++++
+ tools/aix/rpm/btop.sh                         | 16 +++
+ tools/aix/rpm/btop.spec                       | 84 ++++++++++++++++
+ tools/aix/rpm/build_rpm.pl                    | 89 +++++++++++++++++
+ tools/aix/shim/strftime_l_shim.c              | 33 +++++++
+ tools/aix/shim/strftime_l_shim.exp            |  1 +
+ 19 files changed, 793 insertions(+)
+ create mode 100755 tools/aix/ansi_render.pl
+ create mode 100755 tools/aix/check_imports.pl
+ create mode 100644 tools/aix/probes/cxxrt_probe.cpp
+ create mode 100644 tools/aix/probes/libcall_probe.c
+ create mode 100644 tools/aix/probes/perfstat_layout/layout.cpp
+ create mode 100644 tools/aix/probes/perfstat_layout/preamble.h
+ create mode 100644 tools/aix/probes/perfstat_layout/stub/sys/corral.h
+ create mode 100644 tools/aix/probes/perfstat_layout/stub/sys/corralid.h
+ create mode 100644 tools/aix/probes/perfstat_layout/stub/sys/rset.h
+ create mode 100644 tools/aix/probes/perfstat_size_probe.c
+ create mode 100644 tools/aix/probes/perfstat_sizes.cpp
+ create mode 100644 tools/aix/probes/pthread_probe.c
+ create mode 100644 tools/aix/probes/rusage_probe.c
+ create mode 100644 tools/aix/rpm/README.AIX
+ create mode 100644 tools/aix/rpm/btop.sh
+ create mode 100644 tools/aix/rpm/btop.spec
+ create mode 100644 tools/aix/rpm/build_rpm.pl
+ create mode 100644 tools/aix/shim/strftime_l_shim.c
+ create mode 100644 tools/aix/shim/strftime_l_shim.exp
+
+diff --git a/tools/aix/ansi_render.pl b/tools/aix/ansi_render.pl
+new file mode 100755
+index 0000000..bee9cf8
+--- /dev/null
++++ b/tools/aix/ansi_render.pl
+@@ -0,0 +1,98 @@
++#!/usr/bin/perl
++# ansi_render.pl -- Projekt btop-aix (2026-10-12)
++# Zweck: Rendert einen mitgeschnittenen Terminal-Ausgabestrom (btop-Bildschirm mit
++#        ANSI-Cursorpositionierung) in ein ebenes Textbild, damit sich der letzte
++#        Bildschirminhalt eines nicht-interaktiven Laufs pruefen laesst.
++#        Verstanden werden CSI H/f (Cursor setzen), A/B/C/D (bewegen), J/K (loeschen),
++#        s/u und ESC 7/8 (Cursor sichern), SGR und private Modi werden ignoriert,
++#        Breite Zeichen (UTF-8) belegen eine Zelle (Naeherung).
++# Aufruf: perl tools/aix/ansi_render.pl --rows 50 --cols 160 <datei> > bild.txt
++# Letzter bekannter guter Aufruf:
++#   perl tools/aix/ansi_render.pl --rows 50 --cols 160 --keep-last-frame tools/aix/analysis/<lauf>_screen.raw
++use strict;
++use warnings;
++use utf8;
++use Getopt::Long;
++binmode STDOUT, ':encoding(UTF-8)';
++
++my ($rows, $cols, $keep_last) = (50, 160, 0);
++GetOptions('rows=i' => \$rows, 'cols=i' => \$cols, 'keep-last-frame' => \$keep_last)
++    or die "Aufruf: $0 [--rows N] [--cols N] [--keep-last-frame] DATEI\n";
++my $file = shift or die "Datei fehlt\n";
++open my $fh, '<:raw', $file or die "$file: $!";
++local $/; my $data = <$fh>; close $fh;
++utf8::decode($data);
++
++# --keep-last-frame: btop loescht beim Beenden den Bildschirm (ESC [2J); fuer die
++# Pruefung des letzten Bildes wird der Strom vor dem letzten Loeschen abgeschnitten.
++if ($keep_last) {
++    my $pos = rindex($data, "\e[2J");
++    $data = substr($data, 0, $pos) if $pos > 0;
++}
++
++my @screen = map { [ (' ') x $cols ] } 1 .. $rows;
++my ($r, $c) = (0, 0);
++my ($sr, $sc) = (0, 0);
++
++sub clamp { my ($v, $lo, $hi) = @_; $v < $lo ? $lo : $v > $hi ? $hi : $v }
++
++my $i = 0;
++my $len = length $data;
++while ($i < $len) {
++    my $ch = substr($data, $i, 1);
++    if ($ch eq "\e") {
++        my $next = substr($data, $i + 1, 1);
++        if ($next eq '[') {
++            if (substr($data, $i + 2) =~ /^([\?>!]?[0-9;]*)([\x40-\x7e])/) {
++                my ($params, $final) = ($1, $2);
++                $i += 2 + length($params) + 1;
++                my @p = split /;/, ($params =~ s/^[\?>!]//r);
++                if ($final eq 'H' or $final eq 'f') {
++                    $r = clamp((($p[0] // 1) || 1) - 1, 0, $rows - 1);
++                    $c = clamp((($p[1] // 1) || 1) - 1, 0, $cols - 1);
++                } elsif ($final eq 'A') { $r = clamp($r - (($p[0] // 1) || 1), 0, $rows - 1) }
++                elsif ($final eq 'B') { $r = clamp($r + (($p[0] // 1) || 1), 0, $rows - 1) }
++                elsif ($final eq 'C') { $c = clamp($c + (($p[0] // 1) || 1), 0, $cols - 1) }
++                elsif ($final eq 'D') { $c = clamp($c - (($p[0] // 1) || 1), 0, $cols - 1) }
++                elsif ($final eq 'G') { $c = clamp((($p[0] // 1) || 1) - 1, 0, $cols - 1) }
++                elsif ($final eq 'd') { $r = clamp((($p[0] // 1) || 1) - 1, 0, $rows - 1) }
++                elsif ($final eq 'J') {
++                    my $mode = $p[0] // 0;
++                    if ($mode == 2 or $mode == 3) { @screen = map { [ (' ') x $cols ] } 1 .. $rows }
++                    elsif ($mode == 0) { $screen[$r][$_] = ' ' for $c .. $cols - 1; $screen[$_] = [ (' ') x $cols ] for $r + 1 .. $rows - 1 }
++                    else { $screen[$r][$_] = ' ' for 0 .. $c; $screen[$_] = [ (' ') x $cols ] for 0 .. $r - 1 }
++                } elsif ($final eq 'K') {
++                    my $mode = $p[0] // 0;
++                    if ($mode == 0) { $screen[$r][$_] = ' ' for $c .. $cols - 1 }
++                    elsif ($mode == 1) { $screen[$r][$_] = ' ' for 0 .. $c }
++                    else { $screen[$r] = [ (' ') x $cols ] }
++                } elsif ($final eq 's') { ($sr, $sc) = ($r, $c) }
++                elsif ($final eq 'u') { ($r, $c) = ($sr, $sc) }
++                # SGR (m), private modes (h/l), others: ignored
++                next;
++            }
++            $i += 2; next;
++        } elsif ($next eq '7') { ($sr, $sc) = ($r, $c); $i += 2; next }
++        elsif ($next eq '8') { ($r, $c) = ($sr, $sc); $i += 2; next }
++        elsif ($next eq ']') {   # OSC ... BEL or ST
++            my $rest = substr($data, $i);
++            if ($rest =~ /^\e\].*?(\a|\e\\)/s) { $i += length($&); next }
++            $i += 2; next;
++        } elsif ($next eq '(' or $next eq ')') { $i += 3; next }
++        else { $i += 2; next }
++    } elsif ($ch eq "\r") { $c = 0; $i++; next }
++    elsif ($ch eq "\n") { $r = clamp($r + 1, 0, $rows - 1); $c = 0; $i++; next }
++    elsif ($ch eq "\b") { $c = clamp($c - 1, 0, $cols - 1); $i++; next }
++    elsif ($ch eq "\a" or $ch eq "\x0f" or $ch eq "\x0e") { $i++; next }
++    elsif (ord($ch) < 0x20) { $i++; next }
++    $screen[$r][$c] = $ch;
++    $c++;
++    if ($c >= $cols) { $c = $cols - 1 }
++    $i++;
++}
++
++for my $line (@screen) {
++    my $t = join '', @$line;
++    $t =~ s/\s+$//;
++    print "$t\n";
++}
+diff --git a/tools/aix/check_imports.pl b/tools/aix/check_imports.pl
+new file mode 100755
+index 0000000..5fea5e4
+--- /dev/null
++++ b/tools/aix/check_imports.pl
+@@ -0,0 +1,44 @@
++#!/usr/bin/perl
++# check_imports.pl -- Projekt btop-aix (2026-10-12)
++# Zweck: Prueft, ob alle Symbole, die ein XCOFF-Binary (oder eine Liste von
++#        Importen) aus Systembibliotheken importiert, auf einem Zielsystem
++#        exportiert werden. Dient dem Nachweis "auf AIX 7.2 gebaut, laeuft auf 7.1".
++# Eingaben:
++#   --imports <datei>   Liste der Importe (ein Symbol je Zeile), erzeugt mit
++#                       dump -X64 -Tv <binary> | awk '$4=="IMP"{print $NF}' | sort -u
++#   --exports <datei>   Liste der Exporte des Zielsystems (ein Symbol je Zeile), erzeugt mit
++#                       dump -X64 -Tv /usr/lib/libc.a ... | awk '$4=="EXP"{print $NF}' | sort -u
++#   --ignore <regex>    Symbole, die nicht aus libc/libpthreads/libperfstat kommen
++#                       (z. B. ^_Z.*|^__cxa|^_Unwind) und daher nicht geprueft werden.
++# Ausgabe: fehlende Symbole (eines je Zeile) und eine Summenzeile; rc 0 = nichts fehlt.
++# Letzter bekannter guter Aufruf:
++#   perl tools/aix/check_imports.pl --imports <importliste>.txt \
++#        --exports <exportliste>.txt (z. B. tools/aix/analysis/libc_exports_*.txt) \
++#        --ignore '^(_Z|__cxa_|_Unwind_|__xlcxx|__dynamic_cast|__tls_get_mod)'
++use strict;
++use warnings;
++use Getopt::Long;
++
++my ($imports, $exports, $ignore) = ('', '', '');
++GetOptions('imports=s' => \$imports, 'exports=s' => \$exports, 'ignore=s' => \$ignore)
++    or die "Aufruf: $0 --imports DATEI --exports DATEI [--ignore REGEX]\n";
++die "--imports und --exports sind Pflicht\n" unless $imports && $exports;
++
++my %exp;
++open my $e, '<', $exports or die "$exports: $!";
++while (<$e>) { chomp; next unless length; $exp{(split)[-1]} = 1 }   # auch Zeilen "lib symbol" (letztes Feld zaehlt)
++close $e;
++
++my ($total, $skipped, @missing) = (0, 0);
++open my $i, '<', $imports or die "$imports: $!";
++while (<$i>) {
++    chomp; next unless length;
++    if ($ignore ne '' && /$ignore/) { $skipped++; next }
++    $total++;
++    push @missing, $_ unless $exp{$_};
++}
++close $i;
++
++print "$_\n" for @missing;
++printf "geprueft=%d ignoriert=%d fehlend=%d exporte=%d\n", $total, $skipped, scalar @missing, scalar keys %exp;
++exit(@missing ? 1 : 0);
+diff --git a/tools/aix/probes/cxxrt_probe.cpp b/tools/aix/probes/cxxrt_probe.cpp
+new file mode 100644
+index 0000000..0ce14c6
+--- /dev/null
++++ b/tools/aix/probes/cxxrt_probe.cpp
+@@ -0,0 +1,46 @@
++// cxxrt_probe.cpp -- Projekt btop-aix (2026-10-12)
++// Zweck: Prueft, ob ein mit Open XL 17.1.3 (libc++ 19) auf AIX 7.2 gebautes
++// C++23-Programm auf AIX 7.1 laeuft, wenn die libc++-Laufzeit (libc++.a,
++// libc++abi.a, libunwind.a) ueber LIBPATH mitgegeben wird. Uebt die Teile,
++// die btop braucht: Threads, Exceptions, iostream, std::expected, ranges::to,
++// string::contains, optional-Monaden, chrono, filesystem, clock_gettime.
++// Bauen (AIX-7.2-Build-Host mit Open XL): /opt/IBM/openxlC/17.1.3/bin/ibm-clang++_r -m64 -std=c++23 -O1
++//                  -pthread -o cxxrt_probe cxxrt_probe.cpp
++#include <chrono>
++#include <ctime>
++#include <expected>
++#include <filesystem>
++#include <iostream>
++#include <optional>
++#include <ranges>
++#include <stdexcept>
++#include <string>
++#include <thread>
++#include <vector>
++#include <version>
++
++static std::expected<int, std::string> parse(const std::string& s) {
++	if (s.empty()) return std::unexpected("leer");
++	return std::stoi(s);
++}
++
++int main() {
++	std::cout << "_LIBCPP_VERSION=" << _LIBCPP_VERSION << " __cplusplus=" << __cplusplus << "\n";
++	auto v = std::views::iota(1, 6) | std::ranges::to<std::vector<int>>();
++	std::string s = "btop on aix";
++	std::optional<int> o = 20;
++	auto o2 = o.and_then([](int x) { return std::optional<int>{x * 2}; });
++	std::cout << "ranges::to size=" << v.size() << " contains=" << s.contains("aix") << " monad=" << o2.value_or(0) << "\n";
++	std::cout << "expected ok=" << parse("42").value() << " err=" << parse("").error() << "\n";
++	int sum = 0;
++	std::thread t([&] { for (int i : v) sum += i; });
++	t.join();
++	std::cout << "thread sum=" << sum << "\n";
++	try { throw std::runtime_error("exception ok"); } catch (const std::exception& e) { std::cout << e.what() << "\n"; }
++	timespec ts{};
++	clock_gettime(CLOCK_MONOTONIC, &ts);
++	std::cout << "monotonic=" << ts.tv_sec << " fs_exists(/etc)=" << std::filesystem::exists("/etc") << "\n";
++	std::cout << "steady=" << std::chrono::steady_clock::now().time_since_epoch().count() << "\n";
++	std::cout << "OK\n";
++	return 0;
++}
+diff --git a/tools/aix/probes/libcall_probe.c b/tools/aix/probes/libcall_probe.c
+new file mode 100644
+index 0000000..43485aa
+--- /dev/null
++++ b/tools/aix/probes/libcall_probe.c
+@@ -0,0 +1,19 @@
++/* libcall_probe.c -- Projekt btop-aix (2026-10-12)
++ *
++ * Zweck: Zeigt, welche libc-Symbole IBM Open XL (LLVM 19) fuer strlen()/strcmp()
++ * in 64-Bit-Objekten referenziert. Auf AIX 7.1/7.2 heissen sie ___strlen64 und
++ * ___strcmp64; die libc von AIX 6.1 (6100-09) exportiert sie nicht (gemessen an
++ * den Importen des 7.1-btop gegen die 6.1-Exportliste). Die Sonde prueft, ob
++ * -fno-builtin-strlen -fno-builtin-strcmp die Umbenennung unterdrueckt.
++ *
++ * Bauen (AIX-7.2-Build-Host, Open XL, 64 Bit), Symbole mit nm:
++ *   /opt/IBM/openxlC/17.1.3/bin/ibm-clang_r -m64 -O2 -c -o libcall_probe.o libcall_probe.c
++ *   nm -X64 libcall_probe.o | grep -i 'str'
++ *   /opt/IBM/openxlC/17.1.3/bin/ibm-clang_r -m64 -O2 -fno-builtin-strlen -fno-builtin-strcmp -c -o libcall_probe_nb.o libcall_probe.c
++ *   nm -X64 libcall_probe_nb.o | grep -i 'str'
++ */
++#include <string.h>
++#include <stddef.h>
++
++size_t probe_len(const char *s) { return strlen(s); }
++int probe_cmp(const char *a, const char *b) { return strcmp(a, b); }
+diff --git a/tools/aix/probes/perfstat_layout/layout.cpp b/tools/aix/probes/perfstat_layout/layout.cpp
+new file mode 100644
+index 0000000..7f20785
+--- /dev/null
++++ b/tools/aix/probes/perfstat_layout/layout.cpp
+@@ -0,0 +1,29 @@
++// layout.cpp -- project btop-aix (2026-10-12): host-side analysis, NOT an AIX build.
++// Prints sizeof and the offsets of the fields btop reads for one libperfstat header version
++// (SAP-wrapped copies under .../src/libperfstat/includes, namespace PERFSTAT_<ver> or global).
++// Build (Linux host, per version): clang++-22 -std=c++20 -m64 -x c++ -w -I tools/aix/probes/perfstat_layout -isystem tools/aix/probes/perfstat_layout/stub
++//        -DHDR='"<path>/libperfstat_<ver>.h"' [-DNS=PERFSTAT_<ver>] -o layout layout.cpp
++#include "preamble.h"
++typedef int cpu_t;
++#include HDR
++#include <cstdio>
++#include <cstddef>
++#ifdef NS
++using namespace NS;
++#endif
++#define OFF(T, f) []<class U>(U *) { if constexpr (requires(U u) { u.f; }) printf("  %-22s %-14s off=%4zu size=%zu\n", #T, #f, offsetof(U, f), sizeof(U::f)); else printf("  %-22s %-14s (not in this version)\n", #T, #f); }((T *)nullptr)
++int main() {
++	printf("sizeof: cpu_total=%zu cpu=%zu memory_total=%zu disk=%zu netinterface=%zu",
++	       sizeof(perfstat_cpu_total_t), sizeof(perfstat_cpu_t), sizeof(perfstat_memory_total_t), sizeof(perfstat_disk_t), sizeof(perfstat_netinterface_t));
++	if constexpr (requires { sizeof(perfstat_logicalvolume_t); }) printf(" logicalvolume=%zu\n", sizeof(perfstat_logicalvolume_t)); else printf(" logicalvolume=(none)\n");
++	OFF(perfstat_cpu_total_t, ncpus); OFF(perfstat_cpu_total_t, description); OFF(perfstat_cpu_total_t, processorHZ); OFF(perfstat_cpu_total_t, loadavg);
++	OFF(perfstat_cpu_total_t, user); OFF(perfstat_cpu_total_t, sys); OFF(perfstat_cpu_total_t, idle); OFF(perfstat_cpu_total_t, wait); OFF(perfstat_cpu_total_t, lbolt);
++	OFF(perfstat_cpu_t, name); OFF(perfstat_cpu_t, user); OFF(perfstat_cpu_t, sys); OFF(perfstat_cpu_t, idle); OFF(perfstat_cpu_t, wait);
++	OFF(perfstat_memory_total_t, real_total); OFF(perfstat_memory_total_t, real_free); OFF(perfstat_memory_total_t, real_inuse); OFF(perfstat_memory_total_t, numperm);
++	OFF(perfstat_memory_total_t, pgsp_total); OFF(perfstat_memory_total_t, pgsp_free); OFF(perfstat_memory_total_t, real_avail);
++	OFF(perfstat_disk_t, name); OFF(perfstat_disk_t, description); OFF(perfstat_disk_t, vgname); OFF(perfstat_disk_t, size); OFF(perfstat_disk_t, free); OFF(perfstat_disk_t, bsize);
++	OFF(perfstat_disk_t, xfers); OFF(perfstat_disk_t, wblks); OFF(perfstat_disk_t, rblks); OFF(perfstat_disk_t, qdepth); OFF(perfstat_disk_t, time);
++	OFF(perfstat_netinterface_t, name); OFF(perfstat_netinterface_t, ibytes); OFF(perfstat_netinterface_t, obytes);
++	if constexpr (requires { sizeof(perfstat_logicalvolume_t); }) { OFF(perfstat_logicalvolume_t, name); OFF(perfstat_logicalvolume_t, kbreads); OFF(perfstat_logicalvolume_t, kbwrites); }
++	return 0;
++}
+diff --git a/tools/aix/probes/perfstat_layout/preamble.h b/tools/aix/probes/perfstat_layout/preamble.h
+new file mode 100644
+index 0000000..3fcede6
+--- /dev/null
++++ b/tools/aix/probes/perfstat_layout/preamble.h
+@@ -0,0 +1,39 @@
++/* host-side preamble: AIX basic types for LP64 layout analysis of libperfstat headers (not an AIX build) */
++#include <stdint.h>
++#include <stddef.h>
++#include <time.h>
++#include <sys/types.h>
++typedef unsigned long long u_longlong_t;
++typedef long long longlong_t;
++typedef unsigned int uint;
++typedef unsigned short cid_t;
++typedef int rsethandle_t;
++typedef unsigned long ulong;
++typedef unsigned short ushort;
++typedef unsigned char uchar;
++typedef unsigned long long uint64;
++typedef long long int64;
++typedef unsigned int uint32;
++typedef int int32;
++#include <netinet/in.h>
++#include <sys/socket.h>
++typedef u_longlong_t psize_t;
++typedef long tid_t;
++typedef u_longlong_t dev64_t;
++#ifndef MAXCORRALNAMELEN
++#define MAXCORRALNAMELEN 25
++#endif
++#ifndef MAXHOSTNAMELEN
++#define MAXHOSTNAMELEN 256
++#endif
++typedef u_longlong_t rpn64_t;
++typedef unsigned int uint_t;
++typedef u_longlong_t cnt64_t;
++typedef u_longlong_t size64_t;
++typedef long long ssize64_t;
++typedef int pid32_t;
++typedef long long time64_t;
++#define NSIG64 256
++typedef struct { unsigned long long ss[4]; } sigset64_t;
++struct trusage64 { long long r[20]; };
++struct rlimit64 { long long a, b; };
+diff --git a/tools/aix/probes/perfstat_layout/stub/sys/corral.h b/tools/aix/probes/perfstat_layout/stub/sys/corral.h
+new file mode 100644
+index 0000000..3ad3f44
+--- /dev/null
++++ b/tools/aix/probes/perfstat_layout/stub/sys/corral.h
+@@ -0,0 +1 @@
++/* stub for host-side layout analysis */
+diff --git a/tools/aix/probes/perfstat_layout/stub/sys/corralid.h b/tools/aix/probes/perfstat_layout/stub/sys/corralid.h
+new file mode 100644
+index 0000000..3ad3f44
+--- /dev/null
++++ b/tools/aix/probes/perfstat_layout/stub/sys/corralid.h
+@@ -0,0 +1 @@
++/* stub for host-side layout analysis */
+diff --git a/tools/aix/probes/perfstat_layout/stub/sys/rset.h b/tools/aix/probes/perfstat_layout/stub/sys/rset.h
+new file mode 100644
+index 0000000..3ad3f44
+--- /dev/null
++++ b/tools/aix/probes/perfstat_layout/stub/sys/rset.h
+@@ -0,0 +1 @@
++/* stub for host-side layout analysis */
+diff --git a/tools/aix/probes/perfstat_size_probe.c b/tools/aix/probes/perfstat_size_probe.c
+new file mode 100644
+index 0000000..bff7ab1
+--- /dev/null
++++ b/tools/aix/probes/perfstat_size_probe.c
+@@ -0,0 +1,59 @@
++/* perfstat_size_probe.c -- project btop-aix (2026-10-12)
++ *
++ * What : For each libperfstat call btop uses, try the structure size the build headers define
++ *        (sizeof) and, when the library rejects it, shrink the size in steps of 8 bytes until the
++ *        call succeeds. Prints the accepted size and errno of the first failure. Plain C so that
++ *        it can be built against the 7.1 sysroot without the C++ runtime.
++ * Why  : On AIX 7100-02 (libperfstat 7.1.2) btop built against the 7100-05 sysroot showed an empty
++ *        CPU box: the perfstat_cpu_total_t of 7100-05 is larger than the library knows, the call
++ *        fails with EINVAL and btop's CPU collection returns early.
++ * Build: /opt/IBM/openxlC/17.1.3/bin/ibm-clang_r -m64 --sysroot=/build/btop-aix/sysroot71 \
++ *            -L/build/btop-aix/sysroot71/usr/lib -O1 -o perfstat_size_probe perfstat_size_probe.c -lperfstat
++ * Run  : ./perfstat_size_probe   (on the host under test)
++ */
++#include <errno.h>
++#include <libperfstat.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++typedef int (*probe_fn)(void *buf, size_t size);
++
++static int cpu_total(void *b, size_t s)  { return perfstat_cpu_total(NULL, (perfstat_cpu_total_t *)b, s, 1); }
++static int mem_total(void *b, size_t s)  { return perfstat_memory_total(NULL, (perfstat_memory_total_t *)b, s, 1); }
++static int cpu_first(void *b, size_t s)  { perfstat_id_t id; strcpy(id.name, FIRST_CPU); return perfstat_cpu(&id, (perfstat_cpu_t *)b, s, 1); }
++static int disk_first(void *b, size_t s) { perfstat_id_t id; strcpy(id.name, FIRST_DISK); return perfstat_disk(&id, (perfstat_disk_t *)b, s, 1); }
++static int net_first(void *b, size_t s)  { perfstat_id_t id; strcpy(id.name, FIRST_NETINTERFACE); return perfstat_netinterface(&id, (perfstat_netinterface_t *)b, s, 1); }
++static int lv_first(void *b, size_t s)   { perfstat_id_t id; strcpy(id.name, FIRST_LOGICALVOLUME); return perfstat_logicalvolume(&id, (perfstat_logicalvolume_t *)b, s, 1); }
++
++static void probe(const char *name, probe_fn fn, size_t native) {
++	char *buf = calloc(1, native + 64);
++	errno = 0;
++	int rc = fn(buf, native);
++	if (rc >= 1) {
++		printf("%-26s sizeof=%zu  OK (rc=%d)\n", name, native, rc);
++	} else {
++		int first_errno = errno;
++		size_t s = native;
++		int ok = 0;
++		while (s > 64) {
++			s -= 8;
++			errno = 0;
++			memset(buf, 0, native + 64);
++			if (fn(buf, s) >= 1) { ok = 1; break; }
++		}
++		if (ok) printf("%-26s sizeof=%zu  FAILS (rc=%d errno=%d %s); accepted size <= %zu\n", name, native, rc, first_errno, strerror(first_errno), s);
++		else    printf("%-26s sizeof=%zu  FAILS (rc=%d errno=%d %s); no smaller size accepted\n", name, native, rc, first_errno, strerror(first_errno));
++	}
++	free(buf);
++}
++
++int main(void) {
++	probe("perfstat_cpu_total",     cpu_total,  sizeof(perfstat_cpu_total_t));
++	probe("perfstat_cpu",           cpu_first,  sizeof(perfstat_cpu_t));
++	probe("perfstat_memory_total",  mem_total,  sizeof(perfstat_memory_total_t));
++	probe("perfstat_disk",          disk_first, sizeof(perfstat_disk_t));
++	probe("perfstat_netinterface",  net_first,  sizeof(perfstat_netinterface_t));
++	probe("perfstat_logicalvolume", lv_first,   sizeof(perfstat_logicalvolume_t));
++	return 0;
++}
+diff --git a/tools/aix/probes/perfstat_sizes.cpp b/tools/aix/probes/perfstat_sizes.cpp
+new file mode 100644
+index 0000000..af55d56
+--- /dev/null
++++ b/tools/aix/probes/perfstat_sizes.cpp
+@@ -0,0 +1,67 @@
++// perfstat_sizes.cpp -- Projekt btop-aix (2026-10-12)
++// Zweck: Groessen der libperfstat-Strukturen des Build-Hosts ausgeben und
++// die perfstat-Aufrufe mit genau dieser Groesse sowie mit kleineren
++// (aelteren) Groessen probieren. Dient dem Nachweis, ob eine aeltere
++// libperfstat (AIX 7.1) eine groessere sizeof_userbuff akzeptiert.
++// Bauen (AIX-7.2-Build-Host mit Open XL): /opt/IBM/openxlC/17.1.3/bin/ibm-clang++_r -m64 -std=c++23 -O1
++//                  -o perfstat_sizes perfstat_sizes.cpp -lperfstat
++// Aufruf: ./perfstat_sizes            (auf 7.2 und auf 7.1 laufen lassen)
++#include <libperfstat.h>
++#include <cerrno>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++
++template <class T, class F>
++static void probe(const char* what, F fn, size_t native, size_t older) {
++	T buf{};
++	errno = 0;
++	int rc = fn(&buf, native);
++	std::printf("%-26s sizeof=%5zu rc=%d errno=%d", what, native, rc, errno);
++	if (older && older != native) {
++		std::memset(&buf, 0, sizeof buf);
++		errno = 0;
++		rc = fn(&buf, older);
++		std::printf(" | older=%5zu rc=%d errno=%d", older, rc, errno);
++	}
++	std::printf("\n");
++}
++
++int main(int argc, char** argv) {
++	// Optionale "aeltere" Groessen (7.1) als Argumente: cpu_total cpu memory_total disk netinterface
++	size_t o[5] = {0, 0, 0, 0, 0};
++	for (int i = 1; i < argc && i <= 5; ++i) o[i - 1] = std::strtoul(argv[i], nullptr, 10);
++
++	std::printf("sizeof perfstat_cpu_total_t    = %zu\n", sizeof(perfstat_cpu_total_t));
++	std::printf("sizeof perfstat_cpu_t          = %zu\n", sizeof(perfstat_cpu_t));
++	std::printf("sizeof perfstat_memory_total_t = %zu\n", sizeof(perfstat_memory_total_t));
++	std::printf("sizeof perfstat_disk_t         = %zu\n", sizeof(perfstat_disk_t));
++	std::printf("sizeof perfstat_netinterface_t = %zu\n", sizeof(perfstat_netinterface_t));
++	std::printf("sizeof perfstat_pagingspace_t  = %zu\n", sizeof(perfstat_pagingspace_t));
++	std::printf("sizeof perfstat_id_t           = %zu\n", sizeof(perfstat_id_t));
++
++	probe<perfstat_cpu_total_t>("perfstat_cpu_total", [](perfstat_cpu_total_t* b, size_t s) { return perfstat_cpu_total(nullptr, b, (int)s, 1); }, sizeof(perfstat_cpu_total_t), o[0]);
++	probe<perfstat_memory_total_t>("perfstat_memory_total", [](perfstat_memory_total_t* b, size_t s) { return perfstat_memory_total(nullptr, b, (int)s, 1); }, sizeof(perfstat_memory_total_t), o[2]);
++	perfstat_id_t first{};
++	std::strcpy(first.name, FIRST_CPU);
++	probe<perfstat_cpu_t>("perfstat_cpu(first)", [&](perfstat_cpu_t* b, size_t s) { return perfstat_cpu(&first, b, (int)s, 1); }, sizeof(perfstat_cpu_t), o[1]);
++	perfstat_id_t fd{};
++	std::strcpy(fd.name, FIRST_DISK);
++	probe<perfstat_disk_t>("perfstat_disk(first)", [&](perfstat_disk_t* b, size_t s) { return perfstat_disk(&fd, b, (int)s, 1); }, sizeof(perfstat_disk_t), o[3]);
++	perfstat_id_t fn{};
++	std::strcpy(fn.name, FIRST_NETINTERFACE);
++	probe<perfstat_netinterface_t>("perfstat_netinterface(first)", [&](perfstat_netinterface_t* b, size_t s) { return perfstat_netinterface(&fn, b, (int)s, 1); }, sizeof(perfstat_netinterface_t), o[4]);
++
++	perfstat_cpu_total_t ct{};
++	if (perfstat_cpu_total(nullptr, &ct, sizeof ct, 1) == 1) {
++		std::printf("ncpus=%d ncpus_cfg=%d desc='%s' HZ=%llu lbolt=%ld loadavg=%.2f %.2f %.2f\n",
++			ct.ncpus, ct.ncpus_cfg, ct.description, ct.processorHZ, (long)ct.lbolt,
++			ct.loadavg[0] / 65536.0, ct.loadavg[1] / 65536.0, ct.loadavg[2] / 65536.0);
++	}
++	std::printf("count cpu=%d disk=%d net=%d pagingspace=%d\n",
++		perfstat_cpu(nullptr, nullptr, sizeof(perfstat_cpu_t), 0),
++		perfstat_disk(nullptr, nullptr, sizeof(perfstat_disk_t), 0),
++		perfstat_netinterface(nullptr, nullptr, sizeof(perfstat_netinterface_t), 0),
++		perfstat_pagingspace(nullptr, nullptr, sizeof(perfstat_pagingspace_t), 0));
++	return 0;
++}
+diff --git a/tools/aix/probes/pthread_probe.c b/tools/aix/probes/pthread_probe.c
+new file mode 100644
+index 0000000..3f7adb3
+--- /dev/null
++++ b/tools/aix/probes/pthread_probe.c
+@@ -0,0 +1,36 @@
++/* pthread_probe.c -- Projekt btop-aix (2026-10-12)
++ * Zweck: Prueft, ob ein auf AIX 7.2 TL5 (Open XL 17.1.3) gebautes Programm mit
++ * statisch initialisiertem Mutex (PTHREAD_MUTEX_INITIALIZER), dynamisch
++ * initialisiertem Mutex und einem Thread auf AIX 7.1 laeuft. Anlass: die
++ * libc++abi-Laufzeit 17.1.3 bricht auf 7100-05-03 mit
++ * "__cxa_guard_acquire failed to acquire mutex" ab (gemessen 2026-10-12, AIX 7100-05-03).
++ * Bauen (AIX-7.2-Build-Host mit Open XL): /opt/IBM/openxlC/17.1.3/bin/ibm-clang_r -m64 -O1 -pthread -o pthread_probe pthread_probe.c
++ */
++#include <errno.h>
++#include <pthread.h>
++#include <stdio.h>
++#include <string.h>
++
++static pthread_mutex_t static_mx = PTHREAD_MUTEX_INITIALIZER;
++static pthread_once_t once = PTHREAD_ONCE_INIT;
++static int once_ran = 0;
++static void once_fn(void) { once_ran = 1; }
++static void* thr(void* arg) { (void)arg; return (void*)42; }
++
++int main(void)
++{
++	int rc;
++	printf("sizeof(pthread_mutex_t)=%zu sizeof(pthread_cond_t)=%zu\n", sizeof(pthread_mutex_t), sizeof(pthread_cond_t));
++	rc = pthread_mutex_lock(&static_mx);  printf("static  lock   rc=%d (%s)\n", rc, strerror(rc));
++	rc = pthread_mutex_unlock(&static_mx); printf("static  unlock rc=%d (%s)\n", rc, strerror(rc));
++	pthread_mutex_t dyn;
++	rc = pthread_mutex_init(&dyn, NULL); printf("dynamic init   rc=%d (%s)\n", rc, strerror(rc));
++	rc = pthread_mutex_lock(&dyn);  printf("dynamic lock   rc=%d (%s)\n", rc, strerror(rc));
++	rc = pthread_mutex_unlock(&dyn); printf("dynamic unlock rc=%d (%s)\n", rc, strerror(rc));
++	rc = pthread_once(&once, once_fn); printf("once rc=%d ran=%d\n", rc, once_ran);
++	pthread_t t; void* ret = 0;
++	rc = pthread_create(&t, NULL, thr, NULL); printf("create rc=%d (%s)\n", rc, strerror(rc));
++	if (rc == 0) { rc = pthread_join(t, &ret); printf("join rc=%d ret=%ld\n", rc, (long)ret); }
++	printf("OK\n");
++	return 0;
++}
+diff --git a/tools/aix/probes/rusage_probe.c b/tools/aix/probes/rusage_probe.c
+new file mode 100644
+index 0000000..c155b52
+--- /dev/null
++++ b/tools/aix/probes/rusage_probe.c
+@@ -0,0 +1,64 @@
++/* rusage_probe.c -- project btop-aix (2026-10-12)
++ *
++ * What : Shows the unit of procentry64.pi_ru.ru_utime/ru_stime.tv_usec as returned by getprocs64(3):
++ *        AIX documents the field as microseconds like struct timeval, but the kernel stores
++ *        nanoseconds there. A child burns CPU for ~2 s; the parent samples the child's entry
++ *        every 500 ms and prints tv_sec, tv_usec and the derived CPU time under both readings.
++ *        It also prints the delta of perfstat_cpu_total user+sys+idle+wait over the same window,
++ *        which btop uses as the "all CPUs" denominator, and ncpus.
++ * Why  : btop showed 1035 % and 3200 % for single-threaded busy loops on a 32-CPU LPAR.
++ * Build: /opt/IBM/openxlC/17.1.3/bin/ibm-clang_r -m64 -D_ALL_SOURCE -O1 -o rusage_probe rusage_probe.c -lperfstat
++ * Run  : ./rusage_probe
++ */
++#include <errno.h>
++#include <libperfstat.h>
++#include <procinfo.h>
++#include <signal.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/types.h>
++#include <sys/wait.h>
++#include <unistd.h>
++
++
++static int fetch(pid_t pid, struct procentry64 *pe) {
++	pid_t idx = pid;
++	int n = getprocs64(pe, sizeof *pe, NULL, 0, &idx, 1);
++	return (n == 1 && pe->pi_pid == pid) ? 0 : -1;
++}
++
++static unsigned long long total_ticks(void) {
++	perfstat_cpu_total_t ct;
++	memset(&ct, 0, sizeof ct);
++	if (perfstat_cpu_total(NULL, &ct, sizeof ct, 1) != 1) return 0;
++	return ct.user + ct.sys + ct.idle + ct.wait;
++}
++
++int main(void) {
++	pid_t child = fork();
++	if (child < 0) { perror("fork"); return 1; }
++	if (child == 0) {
++		alarm(3);
++		for (volatile unsigned long i = 0;; i++) { }
++	}
++	perfstat_cpu_total_t ct;
++	memset(&ct, 0, sizeof ct);
++	perfstat_cpu_total(NULL, &ct, sizeof ct, 1);
++	printf("ncpus=%d clk_tck=%ld\n", ct.ncpus, sysconf(_SC_CLK_TCK));
++	unsigned long long t0 = total_ticks();
++	for (int i = 0; i < 4; i++) {
++		usleep(500000);
++		struct procentry64 pe;
++		if (fetch(child, &pe) != 0) { printf("sample %d: child gone\n", i); break; }
++		long long us_sec = pe.pi_ru.ru_utime.tv_sec, us_frac = pe.pi_ru.ru_utime.tv_usec;
++		long long ss_sec = pe.pi_ru.ru_stime.tv_sec, ss_frac = pe.pi_ru.ru_stime.tv_usec;
++		double as_usec = us_sec + us_frac / 1e6 + ss_sec + ss_frac / 1e6;
++		double as_nsec = us_sec + us_frac / 1e9 + ss_sec + ss_frac / 1e9;
++		printf("sample %d: utime=%lld.%09lld stime=%lld.%09lld  cpu(if usec)=%.3f s  cpu(if nsec)=%.3f s  perfstat ticks delta=%llu\n",
++		       i, us_sec, us_frac, ss_sec, ss_frac, as_usec, as_nsec, total_ticks() - t0);
++	}
++	kill(child, SIGKILL);
++	waitpid(child, NULL, 0);
++	return 0;
++}
+diff --git a/tools/aix/rpm/README.AIX b/tools/aix/rpm/README.AIX
+new file mode 100644
+index 0000000..6a9c2ee
+--- /dev/null
++++ b/tools/aix/rpm/README.AIX
+@@ -0,0 +1,66 @@
++btop on IBM AIX
++===============
++
++This package installs the AIX port of btop, a resource monitor for the
++terminal (https://github.com/aristocratos/btop).
++
++Requirements
++------------
++* AIX 6.1 TL7 or later: one package for 6.1, 7.1, 7.2 and 7.3 (started on
++  6100-07, 6100-09, 7100-02, 7100-05, 7200-05 and 7300-04). The binary is built
++  against the AIX 6.1 libraries and probes the libperfstat structure size at
++  run time, so newer libperfstat versions are read correctly.
++* rpm.rte 4.9.1.3 or newer (AIX Toolbox for Linux Applications). Hosts with
++  the old rpm.rte 3.0.5 cannot install the package (it needs
++  rpmlib(PayloadFilesHavePrefix)): unpack the tar archive of the same release,
++  see below. The RPM refuses to install over a /usr/bin/btop that is not its
++  own symlink.
++* bos.perf.libperfstat (part of the base operating system).
++* No UTF-8 locale is needed. The launcher /opt/btop/bin/btop adds --force-utf
++  when none is active, and sets TERM=xterm-256color when TERM is empty.
++
++Install, start, remove
++----------------------
++    rpm -ivh btop-<version>-<release>.aix6.1.ppc.rpm   # "aix6.1" names the minimum release; rpm on 7.1-7.3 accepts it
++    btop                      # /usr/bin/btop -> /opt/btop/bin/btop
++    rpm -e btop
++
++Tar archive (rpm.rte 3.0.5, or without root into any directory). It contains
++only opt/btop, so nothing outside that directory is touched:
++
++    cd / && gzip -dc btop-<version>-<release>.aix6.1.ppc.tar.gz | tar -xf -
++    ln -s /opt/btop/bin/btop /usr/bin/btop     # optional
++    rm -rf /opt/btop /usr/bin/btop             # uninstall
++
++A 256-colour terminal (xterm-256color, PuTTY with "xterm-256color") gives
++the intended look; aixterm and vt100 work with the "tty" theme or
++`btop --low-color`.
++
++Layout
++------
++    /opt/btop/bin/btop             launcher (shell script)
++    /opt/btop/bin/btop.bin         the program (64-bit XCOFF, static C++ runtime)
++    /opt/btop/share/btop/themes    themes shipped with btop
++    /opt/btop/share/doc/btop       README.md, LICENSE, this file
++    /usr/bin/btop                  symlink to the launcher (RPM; optional with the tar)
++    ~/.config/btop                 per user configuration
++    ~/.local/state/btop.log        per user log
++
++What the port shows
++-------------------
++CPU, load and frequency from libperfstat (DLPAR changes are followed), memory
++and paging space, mounted file systems from mntctl/statvfs plus the physical
++volumes (hdiskN) with their I/O, network interfaces, and processes from
++getprocs64 (kernel "wait" processes are hidden). Per file system I/O needs
++LVM statistics (`lvmstat -e -v <vg>`). Not available on AIX: sensors,
++battery, GPU. Inside a WPAR the header shows "WPAR".
++
++Provenance
++----------
++Built on an AIX 7.2 host with IBM Open XL C/C++ 17.1.3 against an AIX 6.1
++sysroot and a statically linked libc++ 19.1.7 (the C library functions AIX 6.1
++lacks, aligned_alloc and the POSIX 2008 locale calls, are replaced inside that
++runtime). Source: the aix branch of the
++btop fork published with this package; the upstream base commit and the
++patch series are listed in that repository. `btop --version` prints the
++commit the binary was built from.
+diff --git a/tools/aix/rpm/btop.sh b/tools/aix/rpm/btop.sh
+new file mode 100644
+index 0000000..5bc1b50
+--- /dev/null
++++ b/tools/aix/rpm/btop.sh
+@@ -0,0 +1,16 @@
++#!/bin/sh
++# btop launcher for AIX (project btop-aix, 2026-10-12)
++# Installed as /opt/btop/bin/btop by the btop RPM; /usr/bin/btop points here.
++# Why: AIX hosts rarely have a UTF-8 locale installed and btop refuses to start
++# without one unless --force-utf is given. The launcher adds that option when no
++# UTF-8 locale is active and sets TERM=xterm-256color when TERM is empty.
++# All arguments are passed on unchanged to the real binary.
++case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
++	*[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) ;;
++	*) set -- --force-utf "$@" ;;
++esac
++if [ -z "$TERM" ]; then
++	TERM=xterm-256color
++	export TERM
++fi
++exec /opt/btop/bin/btop.bin "$@"
+diff --git a/tools/aix/rpm/btop.spec b/tools/aix/rpm/btop.spec
+new file mode 100644
+index 0000000..da65087
+--- /dev/null
++++ b/tools/aix/rpm/btop.spec
+@@ -0,0 +1,84 @@
++# btop.spec -- AIX package for btop (project btop-aix, 2026-10-12)
++#
++# What : Binary RPM for AIX built from an already compiled btop binary and the source tree.
++#        Layout: /opt/btop/bin/btop (launcher), /opt/btop/bin/btop.bin (binary),
++#        /opt/btop/share/btop/themes, /opt/btop/share/doc/btop, symlink /usr/bin/btop.
++# Why  : AIX has no C++23 compiler on 7.1 and older hosts; the binary is built on an AIX 7.2
++#        host with IBM Open XL C/C++ against the AIX 6.1 sysroot (tools/aix/sysroot71) and runs
++#        on every release from 6.1 TL7 to 7.3; one package for all of them (decision 2026-10-12).
++# How  : driven by tools/aix/rpm/build_rpm.pl, which stages the file tree and passes
++#        btop_tree, btop_version, btop_release, btop_commit, btop_target as macros.
++# Compat: MD5 file digests and gzip payload so that rpm.rte 4.9 (AIX 6.1/7.1 Toolbox) can
++#        read the package; rpm.rte 3.0.5 cannot (payload prefix), use the tar archive there.
++
++%{!?btop_version: %{error: btop_version is not defined (build_rpm.pl passes it)}}
++%{!?btop_tree:    %{error: btop_tree is not defined (build_rpm.pl passes it)}}
++%{!?btop_release: %define btop_release 1}
++%{!?btop_commit:  %define btop_commit unknown}
++%{!?btop_target:  %define btop_target aix6.1}
++
++%define _binary_payload w9.gzdio
++%define _binary_filedigest_algorithm 1
++%define _source_filedigest_algorithm 1
++%define __os_install_post %{nil}
++%define debug_package %{nil}
++%define _buildhost aix-btop-build
++
++Name:           btop
++Version:        %{btop_version}
++Release:        %{btop_release}
++Summary:        Resource monitor for the terminal (AIX port)
++License:        Apache-2.0
++Group:          Applications/System
++URL:            https://github.com/aristocratos/btop
++Vendor:         aix-btop project
++AutoReqProv:    no
++
++%description
++btop shows CPU, memory, disk, network and process usage in a terminal UI.
++This package carries the AIX port (perfstat, mntctl, getprocs64), built from
++btop commit %{btop_commit} with IBM Open XL C/C++ against the AIX 6.1 headers and
++libraries; it runs on AIX 6.1 TL7 and later, 7.1, 7.2 and 7.3 (the perfstat structure
++size is probed at run time).
++The binary links the C++ runtime statically and imports only libc, libpthreads
++and libperfstat. A UTF-8 locale is not required: /opt/btop/bin/btop adds
++--force-utf when none is active. Themes live in /opt/btop/share/btop/themes,
++the per user configuration in ~/.config/btop.
++
++%pre
++# refuse to overwrite a foreign /usr/bin/btop (AIX Toolbox package or a local build); ours is a symlink to /opt/btop/bin/btop
++if [ -e /usr/bin/btop ] && [ "$(ls -ld /usr/bin/btop 2>/dev/null | awk '{print $NF}')" != /opt/btop/bin/btop ]; then
++	echo "btop: /usr/bin/btop exists and is not the symlink of this package; remove or rename it first" >&2
++	exit 1
++fi
++exit 0
++
++%prep
++%build
++
++%install
++rm -rf "%{buildroot}"
++mkdir -p "%{buildroot}"
++# tar instead of cp: AIX cp -R follows the (dangling on the build host) symlink /usr/bin/btop
++(cd "%{btop_tree}" && tar -cf - .) | (cd "%{buildroot}" && tar -xf -)
++
++%clean
++rm -rf "%{buildroot}"
++
++%files
++%defattr(-,root,system)
++%dir /opt/btop
++%dir /opt/btop/bin
++%attr(0755,root,system) /opt/btop/bin/btop
++%attr(0755,root,system) /opt/btop/bin/btop.bin
++%dir /opt/btop/share
++%dir /opt/btop/share/btop
++/opt/btop/share/btop/themes
++%dir /opt/btop/share/doc
++%docdir /opt/btop/share/doc/btop
++/opt/btop/share/doc/btop
++/usr/bin/btop
++
++%changelog
++* Mon Oct 12 2026 aix-btop project - %{btop_version}-%{btop_release}
++- AIX port of btop: perfstat, mntctl, getprocs64; static libc++ built against AIX 6.1, one package for 6.1 TL7 to 7.3
+diff --git a/tools/aix/rpm/build_rpm.pl b/tools/aix/rpm/build_rpm.pl
+new file mode 100644
+index 0000000..8671579
+--- /dev/null
++++ b/tools/aix/rpm/build_rpm.pl
+@@ -0,0 +1,89 @@
++#!/usr/bin/perl
++# build_rpm.pl -- Projekt btop-aix (2026-10-12)
++#
++# Wer/Was : Baut auf dem AIX-Build-Host das Binaer-RPM und ein gleichwertiges Tar-Archiv fuer
++#           btop aus einem fertig gebauten Binary und dem Quellbaum (Themes, README, LICENSE).
++#           Legt die Dateibaum-Vorlage (/opt/btop, /usr/bin/btop) EINMAL an; Spec und Tar
++#           uebernehmen sie unveraendert (eine Quelle fuer das Layout).
++# Wann    : 2026-10-12.
++# Warum   : Ein installierbares Paket fuer alle AIX-Staende ab 6.1 TL7 (Entscheidung 2026-10-12: nur der
++#           6.1-Bau wird ausgeliefert, er laeuft bis 7.3); nachvollziehbar aus Commit,
++#           Binary und Spec (tools/aix/rpm/btop.spec, Starter tools/aix/rpm/btop.sh).
++# Aufruf  : perl tools/aix/rpm/build_rpm.pl --binary build/aix61-openxl/btop --source . \
++#               --commit <id> --out <dir> [--release 1] [--target ppc-ibm-aix6.1] [--topdir DIR]
++#           --target setzt das rpm-OS-Feld und den Dateinamen (btop-<ver>-<rel>.aix6.1.ppc.rpm): aix6.1 = Mindest-
++#           stand; rpm auf 7.1/7.2/7.3 nimmt es ueber seine Kompatibilitaetstabelle an (gemessen 2026-10-12),
++#           ein nacktes "aix" lehnt es ab ("intended for a different operating system").
++#           Laeuft auf AIX mit rpm.rte 4.x (rpmbuild) und dem System-Perl; keine CPAN-Module.
++# Ausgabe : <out>/btop-<ver>-<rel>.<os>.ppc.rpm, <out>/btop-<ver>-<rel>.<os>.ppc.tar.gz,
++#           <out>/rpm-info.txt (rpm -qpi/-qpl/--requires, cksum). rc 0 nur bei vollstaendigem Lauf.
++use strict;
++use warnings;
++use Getopt::Long;
++use File::Path qw(make_path remove_tree);
++use File::Copy qw(copy);
++use File::Basename qw(basename);
++use Cwd qw(abs_path getcwd);
++
++my %o = (release => '1', target => 'ppc-ibm-aix6.1', spec => '');
++GetOptions(\%o, 'binary=s', 'source=s', 'commit=s', 'out=s', 'release=s', 'target=s', 'topdir=s', 'spec=s')
++    or die "Aufruf: $0 --binary DATEI --source DIR --commit ID --out DIR [--release N] [--target TRIPLE] [--topdir DIR]\n";
++for (qw(binary source commit out)) { die "--$_ fehlt\n" unless defined $o{$_} && length $o{$_} }
++die "$o{binary}: kein ausfuehrbares Binary\n" unless -f $o{binary} && -x _;
++die "$o{source}: kein btop-Quellbaum (themes/ fehlt)\n" unless -d "$o{source}/themes";
++
++my $src    = abs_path($o{source});
++my $binary = abs_path($o{binary});
++make_path($o{out});
++my $out    = abs_path($o{out});
++my $topdir = $o{topdir} ? $o{topdir} : "$out/rpmbuild";
++my $spec   = $o{spec} || "$src/tools/aix/rpm/btop.spec";
++my $launch = "$src/tools/aix/rpm/btop.sh";
++my $readme = "$src/tools/aix/rpm/README.AIX";
++for ($spec, $launch, $readme, "$src/README.md", "$src/LICENSE") { die "$_: fehlt\n" unless -f $_ }
++
++# Version aus dem Quellbaum (Global::Version in src/btop.cpp), nicht aus dem Kopf
++my $version = '';
++open my $vf, '<', "$src/src/btop.cpp" or die "src/btop.cpp: $!";
++while (<$vf>) { if (/const\s+string\s+Version\s*=\s*"([^"]+)"/) { $version = $1; last } }
++close $vf;
++die "Version nicht in src/btop.cpp gefunden\n" unless $version;
++(my $target_os = $o{target}) =~ s/^.*-(aix[0-9.]*).*$/$1/;
++
++sub run { print "+ @_\n"; system(@_) == 0 or die "FAILED (rc=" . ($? >> 8) . "): @_\n" }
++
++# 1. Dateibaum-Vorlage (die eine Quelle fuer RPM und Tar)
++my $tree = "$topdir/tree";
++remove_tree($tree) if -d $tree;
++make_path("$tree/opt/btop/bin", "$tree/opt/btop/share/btop", "$tree/opt/btop/share/doc/btop", "$tree/usr/bin",
++          map { "$topdir/$_" } qw(BUILD RPMS SOURCES SPECS SRPMS BUILDROOT));
++copy($binary, "$tree/opt/btop/bin/btop.bin") or die "copy binary: $!";
++copy($launch, "$tree/opt/btop/bin/btop")     or die "copy launcher: $!";
++chmod 0755, "$tree/opt/btop/bin/btop.bin", "$tree/opt/btop/bin/btop";
++run('cp', '-Rp', "$src/themes", "$tree/opt/btop/share/btop/themes");
++for my $d ("$src/README.md", "$src/LICENSE", $readme) { copy($d, "$tree/opt/btop/share/doc/btop/" . basename($d)) or die "copy $d: $!" }
++symlink('/opt/btop/bin/btop', "$tree/usr/bin/btop") or die "symlink: $!";
++printf "Baum: %s (Version %s, Release %s, Commit %s, Ziel %s)\n", $tree, $version, $o{release}, $o{commit}, $o{target};
++
++# 2. RPM
++run('rpmbuild', '-bb', '--target', $o{target},
++    '--define', "_topdir $topdir", '--define', "btop_tree $tree",
++    '--define', "btop_version $version", '--define', "btop_release $o{release}",
++    '--define', "btop_commit $o{commit}", '--define', "btop_target $target_os", $spec);
++my @rpms = glob("$topdir/RPMS/*/btop-$version-$o{release}*.rpm");
++die "kein RPM unter $topdir/RPMS\n" unless @rpms == 1;
++my $rpm = "$out/" . basename($rpms[0]);
++copy($rpms[0], $rpm) or die "copy rpm: $!";
++
++# 3. Tar-Archiv desselben Baums (fuer Hosts mit rpm.rte 3.0.5)
++(my $tar = $rpm) =~ s/\.rpm$/.tar.gz/;
++# Only opt/btop: unpacking usr/ entries as root under / would reset owner, mode and mtime of /usr and /usr/bin
++# (AIX: bin:bin). The /usr/bin/btop symlink is a documented manual step for the tar route (README.AIX).
++run('sh', '-c', "cd '$tree' && tar -cf - opt | gzip -9 > '$tar'");
++
++# 4. Nachweis
++my $info = "$out/rpm-info.txt";
++# cksum with base names only: the build directory is an internal path and does not belong into the published file
++run('sh', '-c', "{ rpm -qpi '$rpm'; echo; rpm -qp --requires '$rpm'; echo; rpm -qpl '$rpm'; echo; cd '$out' && cksum '" . basename($rpm) . "' '" . basename($tar) . "'; } > '$info' 2>&1");
++open my $i, '<', $info or die; print <$i>; close $i;
++print "\nOK: $rpm\n    $tar\n    $info\n";
+diff --git a/tools/aix/shim/strftime_l_shim.c b/tools/aix/shim/strftime_l_shim.c
+new file mode 100644
+index 0000000..a193dd0
+--- /dev/null
++++ b/tools/aix/shim/strftime_l_shim.c
+@@ -0,0 +1,33 @@
++/* strftime_l_shim.c -- Projekt btop-aix (2026-10-12)
++ *
++ * Zweck: AIX 7.1 exportiert kein strftime_l(3); die libc++-Laufzeit von
++ * IBM Open XL 17.1.3 (libc++.a[libc++.so.1], gebaut fuer AIX 7.2 TL5)
++ * importiert es aus libc.a(shr_64.o). Ohne das Symbol verweigert der
++ * AIX-Loader auf 7.1 das Laden jedes C++-Programms, das diese Laufzeit
++ * nutzt (gemessen 2026-10-12 auf einem 7.1-Host, 7100-05-03: "Symbol strftime_l
++ * (number 217) is not exported from dependent module libc.a[shr_64.o]").
++ *
++ * Diese Shared Library stellt strftime_l ueber uselocale(3)+strftime(3)
++ * bereit und wird per LDR_PRELOAD64 vor allen anderen Modulen geladen;
++ * der Loader loest Importe zuerst gegen Preload-Module auf.
++ *
++ * Bauen (AIX-7.2-Build-Host, Open XL, 64 Bit):
++ *   /opt/IBM/openxlC/17.1.3/bin/ibm-clang_r -m64 -O2 -fPIC -shared \
++ *     -Wl,-bE:strftime_l_shim.exp -Wl,-bnoentry -o libstrftime_l_shim.so strftime_l_shim.c
++ * Einsatz (AIX 7.1):
++ *   LDR_PRELOAD64=/opt/btop/lib/libstrftime_l_shim.so LIBPATH=/opt/btop/lib:/usr/lib:/lib btop
++ *
++ * Auf AIX 7.2/7.3 wird die Bibliothek nicht gebraucht (libc hat strftime_l).
++ */
++#include <locale.h>
++#include <time.h>
++#include <stddef.h>
++
++size_t strftime_l(char *buf, size_t max, const char *fmt, const struct tm *tm, locale_t loc)
++{
++	locale_t old = uselocale(loc);
++	size_t n = strftime(buf, max, fmt, tm);
++	if (old != (locale_t)0)
++		uselocale(old);
++	return n;
++}
+diff --git a/tools/aix/shim/strftime_l_shim.exp b/tools/aix/shim/strftime_l_shim.exp
+new file mode 100644
+index 0000000..5093be7
+--- /dev/null
++++ b/tools/aix/shim/strftime_l_shim.exp
+@@ -0,0 +1 @@
++strftime_l

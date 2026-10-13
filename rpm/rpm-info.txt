@@ -1,0 +1,87 @@
+Name        : btop
+Version     : 1.4.7
+Release     : 1
+Architecture: ppc
+Install Date: (not installed)
+Group       : Applications/System
+Size        : 8140808
+License     : Apache-2.0
+Signature   : (none)
+Source RPM  : btop-1.4.7-1.src.rpm
+Build Date  : Tue Oct 13 14:28:56 2026
+Build Host  : aix-btop-build
+Vendor      : aix-btop project
+URL         : https://github.com/aristocratos/btop
+Summary     : Resource monitor for the terminal (AIX port)
+Description :
+btop shows CPU, memory, disk, network and process usage in a terminal UI.
+This package carries the AIX port (perfstat, mntctl, getprocs64), built from
+btop commit 38f700a with IBM Open XL C/C++ against the AIX 6.1 headers and
+libraries; it runs on AIX 6.1 TL7 and later, 7.1, 7.2 and 7.3 (the perfstat structure
+size is probed at run time).
+The binary links the C++ runtime statically and imports only libc, libpthreads
+and libperfstat. A UTF-8 locale is not required: /opt/btop/bin/btop adds
+--force-utf when none is active. Themes live in /opt/btop/share/btop/themes,
+the per user configuration in ~/.config/btop.
+
+/bin/sh
+rpmlib(CompressedFileNames) <= 3.0.4-1
+rpmlib(PayloadFilesHavePrefix) <= 4.0-1
+
+/opt/btop
+/opt/btop/bin
+/opt/btop/bin/btop
+/opt/btop/bin/btop.bin
+/opt/btop/share
+/opt/btop/share/btop
+/opt/btop/share/btop/themes
+/opt/btop/share/btop/themes/HotPurpleTrafficLight.theme
+/opt/btop/share/btop/themes/adapta.theme
+/opt/btop/share/btop/themes/adwaita-dark.theme
+/opt/btop/share/btop/themes/adwaita.theme
+/opt/btop/share/btop/themes/ayu.theme
+/opt/btop/share/btop/themes/dracula.theme
+/opt/btop/share/btop/themes/dusklight.theme
+/opt/btop/share/btop/themes/elementarish.theme
+/opt/btop/share/btop/themes/everforest-dark-hard.theme
+/opt/btop/share/btop/themes/everforest-dark-medium.theme
+/opt/btop/share/btop/themes/everforest-light-medium.theme
+/opt/btop/share/btop/themes/flat-remix-light.theme
+/opt/btop/share/btop/themes/flat-remix.theme
+/opt/btop/share/btop/themes/flexoki-dark.theme
+/opt/btop/share/btop/themes/flexoki-light.theme
+/opt/btop/share/btop/themes/gotham.theme
+/opt/btop/share/btop/themes/greyscale.theme
+/opt/btop/share/btop/themes/gruvbox_dark.theme
+/opt/btop/share/btop/themes/gruvbox_dark_v2.theme
+/opt/btop/share/btop/themes/gruvbox_light.theme
+/opt/btop/share/btop/themes/gruvbox_material_dark.theme
+/opt/btop/share/btop/themes/horizon.theme
+/opt/btop/share/btop/themes/kanagawa-dragon.theme
+/opt/btop/share/btop/themes/kanagawa-lotus.theme
+/opt/btop/share/btop/themes/kanagawa-wave.theme
+/opt/btop/share/btop/themes/kyli0x.theme
+/opt/btop/share/btop/themes/matcha-dark-sea.theme
+/opt/btop/share/btop/themes/monokai.theme
+/opt/btop/share/btop/themes/night-owl.theme
+/opt/btop/share/btop/themes/nord.theme
+/opt/btop/share/btop/themes/onedark.theme
+/opt/btop/share/btop/themes/orange.theme
+/opt/btop/share/btop/themes/paper.theme
+/opt/btop/share/btop/themes/phoenix-night.theme
+/opt/btop/share/btop/themes/solarized_dark.theme
+/opt/btop/share/btop/themes/solarized_light.theme
+/opt/btop/share/btop/themes/tokyo-night.theme
+/opt/btop/share/btop/themes/tokyo-storm.theme
+/opt/btop/share/btop/themes/tomorrow-night.theme
+/opt/btop/share/btop/themes/twilight.theme
+/opt/btop/share/btop/themes/whiteout.theme
+/opt/btop/share/doc
+/opt/btop/share/doc/btop
+/opt/btop/share/doc/btop/LICENSE
+/opt/btop/share/doc/btop/README.AIX
+/opt/btop/share/doc/btop/README.md
+/usr/bin/btop
+
+647160365 2541006 btop-1.4.7-1.aix6.1.ppc.rpm
+2786388016 2531719 btop-1.4.7-1.aix6.1.ppc.tar.gz

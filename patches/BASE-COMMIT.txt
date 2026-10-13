@@ -1,0 +1,5 @@
+upstream repository: https://github.com/aristocratos/btop
+marking: the series is AI generated (CONTRIBUTING.md, "AI generated code"); every commit subject carries [AI generated]
+base commit (apply the series on top of this): d3389d74e88644c50907e84314c3c7c973ba5be9
+fork branch: aix-public = 92cb0d29e055ca2558e19956cea518400fc990c5 (base + these four patches; the package binary reports this commit)
+apply: git checkout d3389d74e88644c50907e84314c3c7c973ba5be9 && git am patches/*.patch

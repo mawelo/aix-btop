@@ -1,0 +1,362 @@
+From 3bc655675cffffc413eb45d36bbb3dc161afd22f Mon Sep 17 00:00:00 2001
+From: Martin Lonkwitz <mawelo@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 16:39:27 +0200
+Subject: [PATCH 2/4] [AI generated] AIX: build system (CMake, presets, IBM
+ Open XL toolchain files, Makefile), README section
+
+* CMakeLists.txt: AIX branch (sources, -D_ALL_SOURCE -D_THREAD_SAFE,
+  -lperfstat), no -fstack-clash-protection on AIX, and BTOP_GIT_COMMIT to embed
+  the commit in --version when building from a tarball without .git.
+* CMakePresets.json: aix-openxl (AIX 7.2 TL5+/7.3, IBM Open XL C/C++ 17.1.3,
+  64-bit), aix-openxl-debug, aix71-openxl and aix61-openxl (build on a 7.2 host
+  against a sysroot of the target release with a static libc++ 19, see
+  tools/aix/sysroot71).
+* cmake/Toolchain-aix-openxl.cmake and cmake/Toolchain-aix-sysroot-openxl.cmake.
+* Makefile: platform aix (gmake, no LTO), sources via $(wildcard) because AIX
+  find has no -maxdepth.
+* README.md: section "Compilation AIX".
+---
+ CMakeLists.txt                           | 16 +++-
+ CMakePresets.json                        | 96 ++++++++++++++++++++++++
+ Makefile                                 | 18 ++++-
+ README.md                                | 45 +++++++++++
+ cmake/Toolchain-aix-openxl.cmake         | 25 ++++++
+ cmake/Toolchain-aix-sysroot-openxl.cmake | 38 ++++++++++
+ 6 files changed, 233 insertions(+), 5 deletions(-)
+ create mode 100644 CMakePresets.json
+ create mode 100644 cmake/Toolchain-aix-openxl.cmake
+ create mode 100644 cmake/Toolchain-aix-sysroot-openxl.cmake
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 2cbbccd..86eedeb 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -79,6 +79,8 @@ elseif(LINUX)
+   if(BTOP_GPU)
+     add_subdirectory(src/linux/intel_gpu_top)
+   endif()
++elseif(CMAKE_SYSTEM_NAME STREQUAL "AIX")
++  target_sources(libbtop PRIVATE src/aix/btop_collect.cpp src/aix/aix_ifaddrs.cpp src/aix/aix_selfpath.cpp)
+ else()
+   message(FATAL_ERROR "${CMAKE_SYSTEM_NAME} is not supported")
+ endif()
+@@ -89,6 +91,11 @@ execute_process(
+   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+   OUTPUT_VARIABLE GIT_COMMIT
+   OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
++# Source tarballs have no .git: the commit can then be passed in (CI driver, package build)
++set(BTOP_GIT_COMMIT "" CACHE STRING "Commit to embed in --version when the tree is not a git checkout")
++if(NOT GIT_COMMIT AND BTOP_GIT_COMMIT)
++  set(GIT_COMMIT "${BTOP_GIT_COMMIT}")
++endif()
+ set(CONFIGURE_COMMAND
+     "cmake -DBTOP_STATIC=${BTOP_STATIC} -DBTOP_GPU=${BTOP_GPU}"
+ )
+@@ -135,7 +142,8 @@ target_compile_options(libbtop PUBLIC -Wall -Wextra -Wpedantic)
+ 
+ include(CheckCXXCompilerFlag)
+ 
+-if(NOT APPLE)
++if(NOT APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "AIX")
++  # IBM Open XL on AIX accepts the flag but ignores it with a warning on every file
+   target_compile_options(libbtop PUBLIC -fstack-clash-protection)
+ endif()
+ check_cxx_compiler_flag(-fstack-protector HAS_FSTACK_PROTECTOR)
+@@ -247,6 +255,12 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "NetBSD")
+   find_package(kvm REQUIRED)
+   find_package(proplib REQUIRED)
+   target_link_libraries(libbtop kvm::kvm proplib::proplib)
++elseif(CMAKE_SYSTEM_NAME STREQUAL "AIX")
++  # _ALL_SOURCE: with -std=c++23 (strict ANSI) the AIX headers hide BSD and
++  # XPG extensions such as sa_len, SIOCGIFCONF or getprocs64().
++  target_compile_definitions(libbtop PUBLIC _ALL_SOURCE _THREAD_SAFE)
++  # libperfstat: CPU, memory, disk and network counters
++  target_link_libraries(libbtop perfstat)
+ endif()
+ 
+ # Check if lowdown is installed
+diff --git a/CMakePresets.json b/CMakePresets.json
+new file mode 100644
+index 0000000..f673c93
+--- /dev/null
++++ b/CMakePresets.json
+@@ -0,0 +1,96 @@
++{
++  "version": 6,
++  "cmakeMinimumRequired": {
++    "major": 3,
++    "minor": 25,
++    "patch": 0
++  },
++  "configurePresets": [
++    {
++      "name": "default",
++      "displayName": "Release build with the system compiler",
++      "generator": "Ninja",
++      "binaryDir": "${sourceDir}/build/default",
++      "cacheVariables": {
++        "CMAKE_BUILD_TYPE": "Release"
++      }
++    },
++    {
++      "name": "aix-openxl",
++      "displayName": "AIX 7.2 TL5+/7.3 with IBM Open XL C/C++ 17.1.3 (64-bit)",
++      "generator": "Ninja",
++      "binaryDir": "${sourceDir}/build/aix-openxl",
++      "toolchainFile": "${sourceDir}/cmake/Toolchain-aix-openxl.cmake",
++      "environment": {
++        "OBJECT_MODE": "64"
++      },
++      "cacheVariables": {
++        "CMAKE_BUILD_TYPE": "Release",
++        "BTOP_GPU": "OFF",
++        "BTOP_LTO": "OFF",
++        "BUILD_TESTING": "OFF"
++      },
++      "condition": {
++        "type": "equals",
++        "lhs": "${hostSystemName}",
++        "rhs": "AIX"
++      }
++    },
++    {
++      "name": "aix-openxl-debug",
++      "inherits": "aix-openxl",
++      "displayName": "AIX debug build (-O0 -g, libc++ hardening)",
++      "binaryDir": "${sourceDir}/build/aix-openxl-debug",
++      "cacheVariables": {
++        "CMAKE_BUILD_TYPE": "Debug"
++      }
++    },
++    {
++      "name": "aix71-openxl",
++      "inherits": "aix-openxl",
++      "displayName": "AIX 7.1 target: Open XL on 7.2 host, 7.1 sysroot, static libc++ 19",
++      "binaryDir": "${sourceDir}/build/aix71-openxl",
++      "toolchainFile": "${sourceDir}/cmake/Toolchain-aix-sysroot-openxl.cmake",
++      "cacheVariables": {
++        "BTOP_AIX_SYSROOT": "/build/btop-aix/sysroot71",
++        "BTOP_AIX_RUNTIME": "/build/btop-aix/rt71",
++        "BTOP_AIX_COMPAT": "/build/btop-aix/aix71_compat.h"
++      }
++    },
++    {
++      "name": "aix61-openxl",
++      "inherits": "aix-openxl",
++      "displayName": "AIX 6.1 target: Open XL on 7.2 host, 6.1 sysroot, static libc++ 19, xlocale shim",
++      "binaryDir": "${sourceDir}/build/aix61-openxl",
++      "toolchainFile": "${sourceDir}/cmake/Toolchain-aix-sysroot-openxl.cmake",
++      "cacheVariables": {
++        "BTOP_AIX_SYSROOT": "/build/btop-aix/sysroot61",
++        "BTOP_AIX_RUNTIME": "/build/btop-aix/rt61",
++        "BTOP_AIX_COMPAT": "/build/btop-aix/aix61_compat.h",
++        "BTOP_AIX_EXTRA_FLAGS": "-fno-builtin-strlen -fno-builtin-strcmp"
++      }
++    }
++  ],
++  "buildPresets": [
++    {
++      "name": "default",
++      "configurePreset": "default"
++    },
++    {
++      "name": "aix-openxl",
++      "configurePreset": "aix-openxl"
++    },
++    {
++      "name": "aix-openxl-debug",
++      "configurePreset": "aix-openxl-debug"
++    },
++    {
++      "name": "aix71-openxl",
++      "configurePreset": "aix71-openxl"
++    },
++    {
++      "name": "aix61-openxl",
++      "configurePreset": "aix61-openxl"
++    }
++  ]
++}
+diff --git a/Makefile b/Makefile
+index d08b59a..3498229 100644
+--- a/Makefile
++++ b/Makefile
+@@ -194,6 +194,13 @@ else ifeq ($(PLATFORM_LC),netbsd)
+ 	override ADDFLAGS += -lkvm -lprop
+ 	export MAKE = gmake
+ 	SU_GROUP := wheel
++else ifeq ($(PLATFORM_LC),aix)
++	PLATFORM_DIR := aix
++	THREADS	:= $(shell lsdev -Cc processor 2>/dev/null | grep -c Available || echo 1)
++	#? 64-bit objects; _ALL_SOURCE unhides BSD/XPG extensions under -std=c++23; libperfstat for all counters
++	override ADDFLAGS += -m64 -D_ALL_SOURCE -D_THREAD_SAFE -lperfstat
++	export MAKE = gmake
++	SU_GROUP := system
+ else
+ $(error $(call red_i,ERROR: $(WHITE)Unsupported platform ($(PLATFORM))))
+ endif
+@@ -204,9 +211,11 @@ ifeq ($(THREADS),1)
+ 	override THREADS := auto
+ endif
+ 
+-#? LTO command line
++#? LTO command line (not on AIX: IBM Open XL has no thin LTO and the AIX linker needs libLTO plumbing)
+ ifeq ($(BUILD_TYPE),Release)
+-	ifeq ($(CXX_IS_CLANG),true)
++	ifeq ($(PLATFORM_LC),aix)
++		LTO :=
++	else ifeq ($(CXX_IS_CLANG),true)
+ 		LTO := -flto=thin
+ 	else
+ 		LTO := -flto=$(THREADS)
+@@ -245,9 +254,10 @@ ifdef DEBUG
+ 	override OPTFLAGS := -O0 -g
+ endif
+ 
+-SOURCES	:= $(sort $(shell find $(SRCDIR) -maxdepth 1 -type f -name *.$(SRCEXT)))
++#? $(wildcard) instead of find: AIX find has no -maxdepth
++SOURCES	:= $(sort $(wildcard $(SRCDIR)/*.$(SRCEXT)))
+ 
+-SOURCES += $(sort $(shell find $(SRCDIR)/$(PLATFORM_DIR) -maxdepth 1 -type f -name *.$(SRCEXT)))
++SOURCES += $(sort $(wildcard $(SRCDIR)/$(PLATFORM_DIR)/*.$(SRCEXT)))
+ 
+ OBJECTS	:= $(patsubst $(SRCDIR)/%,$(BUILDDIR)/%,$(SOURCES:.$(SRCEXT)=.$(OBJEXT)))
+ 
+diff --git a/README.md b/README.md
+index 9b0c293..5194f5a 100644
+--- a/README.md
++++ b/README.md
+@@ -39,6 +39,7 @@
+ * [Compilation FreeBSD](#compilation-freebsd)
+ * [Compilation NetBSD](#compilation-netbsd)
+ * [Compilation OpenBSD](#compilation-openbsd)
++* [Compilation AIX](#compilation-aix)
+ * [Testing](#testing)
+ * [GPU compatibility](#gpu-compatibility)
+ * [Installing the snap](#installing-the-snap)
+@@ -1291,6 +1292,50 @@ Testing requires [CMake](cmake.org). Tests are build by default and can be run w
+ 
+ If you want to disable building tests, pass `-DBUILD_TESTING=OFF` to the configure step.
+ 
++## Compilation AIX
++
++   Supported: AIX 7.2 TL5 and 7.3 with IBM Open XL C/C++ 17.1.3 or newer (LLVM 19 based, ships libc++ 19).
++   AIX 7.1 has no C++23 compiler; a 7.1 binary is built on a 7.2 host against a 7.1 sysroot with a
++   static libc++, see `docs/aix-port.md`.
++
++   Data sources are libperfstat (CPU, memory, disks, network), `mntctl(2)`/`statvfs(2)` (file systems)
++   and `getprocs64(3)` (processes). Physical volumes (`hdiskN`) appear in the disks box next to the
++   mounted file systems; per file system I/O needs LVM statistics (`lvmstat -e`). No sensors, no battery, no GPU.
++
++   **Requirements**
++
++   * `openxlCcmp.17.1.3` (or newer) from IBM
++   * `cmake` >= 3.25 and `ninja-build` (or GNU `make`) from the AIX Toolbox
++
++   **With CMake (preset `aix-openxl`)**
++
++   ```bash
++   export PATH=/opt/freeware/bin:$PATH OBJECT_MODE=64
++   cmake --preset aix-openxl
++   cmake --build --preset aix-openxl -j 8
++   build/aix-openxl/btop --version
++   ```
++
++   The toolchain file `cmake/Toolchain-aix-openxl.cmake` selects `/opt/IBM/openxlC/17.1.3`; pass
++   `-DBTOP_OPENXL_ROOT=/opt/IBM/openxlC/17.1.4` for another level. LTO and GPU support are off on AIX.
++
++   **With GNU make**
++
++   ```bash
++   gmake CXX=/opt/IBM/openxlC/17.1.3/bin/ibm-clang++_r
++   ```
++
++   **Runtime dependencies** of the resulting 64-bit binary: `libc.a`, `libpthreads.a`, `libperfstat.a`
++   and the IBM Open XL runtime filesets `libc++.rte`, `libc++abi.rte`, `libunwind.rte` (17.1.3 or newer).
++
++   **Notes**
++
++   * The terminal must speak UTF-8. Without a UTF-8 locale on the host (`bos.loc.utf.EN_US` is rarely
++     installed) start btop with `LANG=en_US.UTF-8` in the environment or with `--force-utf`; btop then
++     logs a warning and continues.
++   * `--sysroot`, Open XL and the AIX linker: see `docs/aix-port.md` for the 7.1 build and the list of
++     AIX specific pitfalls met while porting.
++
+ ## Installing the snap
+ [![btop](https://snapcraft.io/btop/badge.svg)](https://snapcraft.io/btop)
+ 
+diff --git a/cmake/Toolchain-aix-openxl.cmake b/cmake/Toolchain-aix-openxl.cmake
+new file mode 100644
+index 0000000..0b55906
+--- /dev/null
++++ b/cmake/Toolchain-aix-openxl.cmake
+@@ -0,0 +1,25 @@
++# SPDX-License-Identifier: Apache-2.0
++#
++# Toolchain file for building btop on AIX 7.2 TL5+ / 7.3 with IBM Open XL C/C++
++# 17.1.3 (clang 19, libc++ 19). Native build, so CMAKE_SYSTEM_NAME is left to
++# CMake (setting it here would flag the build as cross compiling).
++#
++# Usage on the AIX host:
++#   OBJECT_MODE=64 cmake --preset aix-openxl
++#   cmake --build --preset aix-openxl
++#
++# Override the compiler location with -DBTOP_OPENXL_ROOT=/opt/IBM/openxlC/17.1.4
++# if a different Open XL level is installed.
++
++set(BTOP_OPENXL_ROOT "/opt/IBM/openxlC/17.1.3" CACHE PATH "IBM Open XL C/C++ installation root")
++
++set(CMAKE_C_COMPILER   "${BTOP_OPENXL_ROOT}/bin/ibm-clang_r")
++set(CMAKE_CXX_COMPILER "${BTOP_OPENXL_ROOT}/bin/ibm-clang++_r")
++
++# 64-bit objects everywhere (the Open XL default is 32-bit unless OBJECT_MODE=64)
++set(CMAKE_C_FLAGS_INIT          "-m64")
++set(CMAKE_CXX_FLAGS_INIT        "-m64")
++set(CMAKE_EXE_LINKER_FLAGS_INIT "-m64")
++
++# AIX shared libraries live inside .a archives; never pick up stray .so files
++set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+diff --git a/cmake/Toolchain-aix-sysroot-openxl.cmake b/cmake/Toolchain-aix-sysroot-openxl.cmake
+new file mode 100644
+index 0000000..09bbb7b
+--- /dev/null
++++ b/cmake/Toolchain-aix-sysroot-openxl.cmake
+@@ -0,0 +1,38 @@
++# SPDX-License-Identifier: Apache-2.0
++#
++# Toolchain file for building a btop binary that runs on an AIX release older than the
++# build host (AIX 7.1 or 6.1). Build host: AIX 7.2 TL5+ with IBM Open XL C/C++ 17.1.3.
++# The compiler is pointed at a sysroot made from an installation of the target release and
++# at a libc++/libc++abi/libunwind built statically against that sysroot
++# (tools/aix/sysroot71/make_sysroot.pl, make_cxxwrap.pl, build_rt.pl).
++# Background and measurements: docs/aix-port.md, section 5 (7.1) and 7 (6.1).
++#
++# Cache variables (set by the presets aix71-openxl / aix61-openxl, override with -D):
++#   BTOP_AIX_SYSROOT      root of the target sysroot (usr/include, usr/lib, usr/ccs/lib, cxxwrap)
++#   BTOP_AIX_RUNTIME      install prefix of the static libc++ built against that sysroot
++#   BTOP_AIX_COMPAT       header prepended to every translation unit (strftime_l, noreturn, 6.1: xlocale)
++#   BTOP_AIX_EXTRA_FLAGS  extra compiler flags (6.1: -fno-builtin-strlen -fno-builtin-strcmp)
++
++set(BTOP_OPENXL_ROOT     "/opt/IBM/openxlC/17.1.3"        CACHE PATH "IBM Open XL C/C++ installation root")
++set(BTOP_AIX_SYSROOT     "/build/btop-aix/sysroot71"      CACHE PATH "sysroot of the target AIX release")
++set(BTOP_AIX_RUNTIME     "/build/btop-aix/rt71"           CACHE PATH "static libc++ built against the sysroot")
++set(BTOP_AIX_COMPAT      "/build/btop-aix/aix71_compat.h" CACHE FILEPATH "compatibility header for the target release")
++set(BTOP_AIX_EXTRA_FLAGS ""                               CACHE STRING "extra compiler flags for the target release")
++
++set(CMAKE_C_COMPILER   "${BTOP_OPENXL_ROOT}/bin/ibm-clang_r")
++set(CMAKE_CXX_COMPILER "${BTOP_OPENXL_ROOT}/bin/ibm-clang++_r")
++
++# __LIBC_NO_CPP_MATH_OVERLOADS__: the (patched) math.h must not add its own C++ overloads of
++# abs/acos/..., libc++ 19 provides them (same define as LLVM's libcxx/cmake/caches/AIX.cmake)
++set(_btop_sr_common "-m64 --sysroot=${BTOP_AIX_SYSROOT} -include ${BTOP_AIX_COMPAT} -D__LIBC_NO_CPP_MATH_OVERLOADS__ ${BTOP_AIX_EXTRA_FLAGS}")
++set(CMAKE_C_FLAGS_INIT   "${_btop_sr_common}")
++# -nostdinc++: the IBM libc++ headers of the host must not be seen, only our own libc++ 19 headers
++# cxxwrap: extern "C" wrappers around the target's C headers (tools/aix/sysroot71/make_cxxwrap.pl)
++set(CMAKE_CXX_FLAGS_INIT "${_btop_sr_common} -nostdinc++ -isystem ${BTOP_AIX_RUNTIME}/include/c++/v1 -isystem ${BTOP_AIX_SYSROOT}/cxxwrap")
++
++# Link order: target libraries before the host's /usr/lib (the driver adds no -L for the sysroot),
++# our static C++ runtime instead of the IBM one (-nostdlib++ drops the driver's -lc++ -lc++abi).
++set(CMAKE_EXE_LINKER_FLAGS_INIT
++  "-m64 --sysroot=${BTOP_AIX_SYSROOT} -L${BTOP_AIX_RUNTIME}/lib -L${BTOP_AIX_SYSROOT}/usr/lib -nostdlib++ ${BTOP_AIX_RUNTIME}/lib/libc++.a ${BTOP_AIX_RUNTIME}/lib/libc++abi.a ${BTOP_AIX_RUNTIME}/lib/libunwind.a")
++
++set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
