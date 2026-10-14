@@ -1,6 +1,6 @@
-From 54aac1d0cb64026bc3c68421ee1b33679fb5bd53 Mon Sep 17 00:00:00 2001
+From 2d0067848b1cca51d5ed430453811c214b47d296 Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Wed, 14 Oct 2026 07:52:03 +0200
+Date: Wed, 14 Oct 2026 13:54:39 +0200
 Subject: [PATCH 3/4] [AI generated] AIX 7.1/6.1 targets: sysroot tooling,
  static libc++ 19 build, LLVM patches, compat headers
 
@@ -53,39 +53,39 @@ The resulting btop binaries import only libc, libpthreads and libperfstat.
 
 diff --git a/tools/aix/sysroot71/aix61_compat.h b/tools/aix/sysroot71/aix61_compat.h
 new file mode 100644
-index 0000000..6988718
+index 0000000..a63842f
 --- /dev/null
 +++ b/tools/aix/sysroot71/aix61_compat.h
 @@ -0,0 +1,135 @@
-+/* aix61_compat.h -- Projekt btop-aix (2026-10-12)
++/* aix61_compat.h -- project btop-aix (2026-10-12)
 + *
-+ * Zweck: Wird beim Bau von libc++/libc++abi/libunwind (LLVM 19.1.7) und von btop
-+ * gegen das AIX-6.1-Sysroot per "-include" vorangestellt. Die libc von AIX 6.1
-+ * (bos.rte.libc 6.1.9.30, gemessen 2026-10-12 an 6100-09-04) kennt die
-+ * POSIX-2008-Locale-Schnittstelle nicht: kein locale_t, kein newlocale/uselocale/
-+ * freelocale, keine *_l-Funktionen (isdigit_l, strcoll_l, towupper_l, ...).
-+ * libc++ 19 setzt sie auf AIX voraus (locale_base_api/ibm.h).
++ * Who/what: Prepended via "-include" when building libc++/libc++abi/libunwind (LLVM 19.1.7)
++ * and btop against the AIX 6.1 sysroot. The AIX 6.1 libc
++ * (bos.rte.libc 6.1.9.30, measured 2026-10-12 on 6100-09-04) lacks the
++ * POSIX 2008 locale interface: no locale_t, no newlocale/uselocale/
++ * freelocale, no *_l functions (isdigit_l, strcoll_l, towupper_l, ...).
++ * libc++ 19 requires them on AIX (locale_base_api/ibm.h).
 + *
-+ * Nachbildung hier: ein einziges, globales Locale. newlocale liefert einen
-+ * Platzhalter (nie NULL, sonst wirft locale_byname), uselocale/freelocale tun
-+ * nichts, jede *_l-Funktion ruft die Fassung ohne Locale-Argument. Folge:
-+ * std::locale("de_DE") erzeugt kein eigenes Locale, Zahlen-/Zeitformate folgen
-+ * dem per setlocale(3) gesetzten Prozess-Locale. btop braucht nur das "C"-Locale.
++ * Emulation here: one single, global locale. newlocale returns a
++ * placeholder (never NULL, otherwise locale_byname throws), uselocale/freelocale do
++ * nothing, every *_l function calls the variant without the locale argument. Consequence:
++ * std::locale("de_DE") creates no locale of its own; number and time formats follow
++ * the process locale set by setlocale(3). btop needs only the "C" locale.
 + *
-+ * Dazu aus aix71_compat.h: strftime_l (ueber die hiesige uselocale-Attrappe) und
-+ * die noreturn-Deklarationen von abort/exit/_Exit.
-+ * Ausserdem aligned_alloc ueber posix_memalign (fehlt vor 6.1 TL9), damit das Paket ab 6.1 TL7 laedt.
++ * In addition, from aix71_compat.h: strftime_l (through the dummy uselocale here) and
++ * the noreturn declarations of abort/exit/_Exit.
++ * Also aligned_alloc through posix_memalign (missing before 6.1 TL9), so that the package loads from 6.1 TL7 on.
 + *
-+ * Weitere 6.1-Besonderheiten liegen in den Compiler-Flags (Preset aix61-openxl,
-+ * build_rt.pl --extra-flags): -fno-builtin-strlen -fno-builtin-strcmp, weil
-+ * Open XL sonst ___strlen64/___strcmp64 referenziert, die 6.1 nicht exportiert
-+ * (Sonde tools/aix/probes/libcall_probe.c), und -DREMOVE_ALL_USE_DIRECTORY_ITERATOR,
-+ * weil 6.1 openat/fdopendir/unlinkat nicht hat (libc++ hat dafuer den
-+ * Directory-Iterator-Pfad). fchmodat/utimensat entfallen von selbst, weil 6.1
-+ * AT_FDCWD und UTIME_OMIT nicht definiert.
++ * Further 6.1 specifics live in the compiler flags (preset aix61-openxl,
++ * build_rt.pl --extra-flags): -fno-builtin-strlen -fno-builtin-strcmp, because
++ * Open XL otherwise references ___strlen64/___strcmp64, which 6.1 does not export
++ * (probe tools/aix/probes/libcall_probe.c), and -DREMOVE_ALL_USE_DIRECTORY_ITERATOR,
++ * because 6.1 lacks openat/fdopendir/unlinkat (libc++ provides the
++ * directory iterator path for that). fchmodat/utimensat drop out by themselves, because 6.1
++ * does not define AT_FDCWD and UTIME_OMIT.
 + *
-+ * Nur fuer Builds gegen das 6.1-Sysroot einbinden (Open XL definiert _AIX72
-+ * nach dem Build-Host, nicht nach dem Sysroot - kein Makro-Schutz moeglich).
++ * Include only for builds against the 6.1 sysroot (Open XL defines _AIX72
++ * according to the build host, not the sysroot - no macro guard possible).
 + */
 +#ifndef BTOP_AIX61_COMPAT_H
 +#define BTOP_AIX61_COMPAT_H
@@ -103,7 +103,7 @@ index 0000000..6988718
 +extern "C" {
 +#endif
 +
-+/* --- Locale-Objekte: ein globales Locale ----------------------------------- */
++/* --- locale objects: one global locale -------------------------------------- */
 +typedef struct __btop_locale *locale_t;
 +
 +#define LC_GLOBAL_LOCALE ((locale_t)-1)
@@ -130,14 +130,14 @@ index 0000000..6988718
 +}
 +#endif
 +
-+/* strftime_l und noreturn-Deklarationen (nutzt das uselocale von oben) */
++/* strftime_l and noreturn declarations (uses the uselocale above) */
 +#include "aix71_compat.h"
 +
 +#ifdef __cplusplus
 +extern "C" {
 +#endif
 +
-+/* --- *_l-Funktionen: Locale-Argument wird ignoriert ------------------------ */
++/* --- *_l functions: the locale argument is ignored ------------------------- */
 +#define BTOP_CTYPE_L(name) \
 +	static inline int name##_l(int __c, locale_t __l) { (void)__l; return name(__c); }
 +BTOP_CTYPE_L(isalnum) BTOP_CTYPE_L(isalpha) BTOP_CTYPE_L(isblank) BTOP_CTYPE_L(iscntrl)
@@ -168,10 +168,10 @@ index 0000000..6988718
 +#endif
 +
 +/* --- aligned_alloc (C11) ------------------------------------------------------ */
-+/* Fehlt in der libc vor 6.1 TL9 (gemessen 2026-10-12 an 6100-07-10: der Lader bricht mit
-+ * "Symbol aligned_alloc ... not exported" ab). libc++ 19 ruft es fuer ueberausgerichtetes
-+ * operator new (__libcpp_aligned_alloc). Ersatz ueber posix_memalign, das 6.1 seit TL0 hat;
-+ * free(3) passt zu beiden. Das Makro wirkt auf libc++, libc++abi und btop (alle per -include). */
++/* Missing in the libc before 6.1 TL9 (measured 2026-10-12 on 6100-07-10: the loader aborts with
++ * "Symbol aligned_alloc ... not exported"). libc++ 19 calls it for over-aligned
++ * operator new (__libcpp_aligned_alloc). Replaced through posix_memalign, which 6.1 has since TL0;
++ * free(3) matches both. The macro affects libc++, libc++abi and btop (all via -include). */
 +#include <stdlib.h>
 +#include <errno.h>
 +static inline void *btop_aligned_alloc(size_t alignment, size_t size) {
@@ -182,9 +182,9 @@ index 0000000..6988718
 +}
 +#define aligned_alloc btop_aligned_alloc
 +
-+/* --- open(2)-Flag ----------------------------------------------------------- */
-+/* 6.1 kennt kein O_CLOEXEC (ab 7.1). btop oeffnet damit nur Lesedateien und startet
-+ * keine Kindprozesse, deshalb genuegt ein neutrales Flag. */
++/* --- open(2) flag ----------------------------------------------------------- */
++/* 6.1 has no O_CLOEXEC (7.1 and later). btop uses it only to open files for reading and starts
++ * no child processes, so a neutral flag suffices. */
 +#include <fcntl.h>
 +#ifndef O_CLOEXEC
 +#define O_CLOEXEC 0
@@ -194,22 +194,22 @@ index 0000000..6988718
 +#endif /* BTOP_AIX61_COMPAT_H */
 diff --git a/tools/aix/sysroot71/aix71_compat.h b/tools/aix/sysroot71/aix71_compat.h
 new file mode 100644
-index 0000000..616964d
+index 0000000..464afc3
 --- /dev/null
 +++ b/tools/aix/sysroot71/aix71_compat.h
 @@ -0,0 +1,50 @@
-+/* aix71_compat.h -- Projekt btop-aix (2026-10-12)
++/* aix71_compat.h -- project btop-aix (2026-10-12)
 + *
-+ * Zweck: Wird beim Bau von libc++/libc++abi/libunwind (LLVM 19.1.7) und von
-+ * btop gegen das AIX-7.1-Sysroot per "-include" vorangestellt. AIX 7.1 (bos.rte
-+ * 7.1.5.31) kennt kein strftime_l(3); libc++ ruft es in src/locale.cpp auf.
-+ * Die Funktion wird hier als static inline ueber uselocale(3)+strftime(3)
-+ * nachgebildet, so dass kein Import aus libc entsteht (gemessen 2026-10-12:
-+ * strftime_l ist das einzige Symbol der libc++-19-Laufzeit, das 7.1 fehlt).
++ * Who/what: Prepended via "-include" when building libc++/libc++abi/libunwind (LLVM 19.1.7)
++ * and btop against the AIX 7.1 sysroot. AIX 7.1 (bos.rte
++ * 7.1.5.31) has no strftime_l(3); libc++ calls it in src/locale.cpp.
++ * The function is emulated here as static inline through uselocale(3)+strftime(3),
++ * so that no import from libc arises (measured 2026-10-12:
++ * strftime_l is the only symbol of the libc++ 19 runtime that 7.1 lacks).
 + *
-+ * Nur fuer Builds gegen das 7.1-Sysroot einbinden: Open XL definiert _AIX72
-+ * nach dem Build-Host, nicht nach dem Sysroot, daher kein Makro-Schutz.
-+ * Auf AIX 7.2 und spaeter deklariert <time.h> strftime_l selbst.
++ * Include only for builds against the 7.1 sysroot: Open XL defines _AIX72
++ * according to the build host, not the sysroot, hence no macro guard.
++ * On AIX 7.2 and later, <time.h> declares strftime_l itself.
 + */
 +#ifndef BTOP_AIX71_COMPAT_H
 +#define BTOP_AIX71_COMPAT_H
@@ -225,9 +225,9 @@ index 0000000..616964d
 +extern "C" {
 +#endif
 +
-+/* Die 7.1-<stdlib.h> deklariert abort/exit/_Exit ohne noreturn; libunwind und
-+ * libc++ bauen mit -Werror=return-type und brauchen die Zusicherung.
-+ * Eine Wiederholung der Deklaration mit GNU-Attribut ist zulaessig. */
++/* The 7.1 <stdlib.h> declares abort/exit/_Exit without noreturn; libunwind and
++ * libc++ build with -Werror=return-type and need the guarantee.
++ * Repeating the declaration with a GNU attribute is permitted. */
 +extern void abort(void) __attribute__((__noreturn__));
 +extern void exit(int) __attribute__((__noreturn__));
 +extern void _Exit(int) __attribute__((__noreturn__));
@@ -250,25 +250,25 @@ index 0000000..616964d
 +#endif /* BTOP_AIX71_COMPAT_H */
 diff --git a/tools/aix/sysroot71/build_rt.pl b/tools/aix/sysroot71/build_rt.pl
 new file mode 100755
-index 0000000..29be787
+index 0000000..fb70127
 --- /dev/null
 +++ b/tools/aix/sysroot71/build_rt.pl
 @@ -0,0 +1,76 @@
 +#!/usr/bin/perl
-+# build_rt.pl -- Projekt btop-aix (2026-10-12)
++# build_rt.pl -- project btop-aix (2026-10-12)
 +#
-+# Zweck: Baut libunwind, libc++abi und libc++ aus den LLVM-19.1.7-Quellen mit
-+# IBM Open XL 17.1.3 auf einem AIX-7.2-Host GEGEN EIN AELTERES AIX-SYSROOT (7.1 oder 6.1), statisch,
-+# und installiert sie nach <prefix>. Damit kann btop fuer AIX 7.1 gelinkt
-+# werden (die IBM-Laufzeit 17.1.3 laeuft auf 7.1 nicht: PTHREAD_MUTEX_INITIALIZER
-+# hat dort ein anderes Layout, strftime_l fehlt).
++# Who/what: Builds libunwind, libc++abi and libc++ from the LLVM 19.1.7 sources with
++#           IBM Open XL 17.1.3 on an AIX 7.2 host AGAINST AN OLDER AIX SYSROOT (7.1 or 6.1), statically,
++#           and installs them into <prefix>. This lets btop be linked for AIX 7.1
++#           (the IBM runtime 17.1.3 does not run on 7.1: PTHREAD_MUTEX_INITIALIZER
++#           has a different layout there, strftime_l is missing).
 +#
-+# Laeuft auf dem AIX-Build-Host (AIX-7.2-Build-Host mit Open XL). Aufruf:
++# Runs on the AIX build host (AIX 7.2 build host with Open XL). Usage:
 +#   perl build_rt.pl --src /build/btop-aix/llvm-project-19.1.7.src \
 +#        --sysroot /build/btop-aix/sysroot71 --prefix /build/btop-aix/rt71 \
 +#        --build /build/btop-aix/build-rt71 --compat /build/btop-aix/aix71_compat.h [--jobs 12] [--configure-only]
-+#        [--extra-flags "-fno-builtin-strlen -fno-builtin-strcmp -DREMOVE_ALL_USE_DIRECTORY_ITERATOR"]  (AIX 6.1, s. aix61_compat.h)
-+# Compiler: ausschliesslich IBM Open XL, absoluter Pfad (Regel aix.md).
++#        [--extra-flags "-fno-builtin-strlen -fno-builtin-strcmp -DREMOVE_ALL_USE_DIRECTORY_ITERATOR"]  (AIX 6.1, see aix61_compat.h)
++# Compiler: IBM Open XL only, absolute path (rule aix.md).
 +use strict;
 +use warnings;
 +use Getopt::Long;
@@ -276,21 +276,21 @@ index 0000000..29be787
 +
 +my %o = (jobs => 12, 'extra-flags' => '');
 +GetOptions(\%o, 'src=s', 'sysroot=s', 'prefix=s', 'build=s', 'compat=s', 'jobs=i', 'configure-only', 'extra-flags=s')
-+    or die "Aufruf: $0 --src DIR --sysroot DIR --prefix DIR --build DIR --compat DATEI [--jobs N] [--configure-only] [--extra-flags FLAGS]\n";
-+for (qw(src sysroot prefix build compat)) { die "--$_ fehlt\n" unless $o{$_} }
-+for (qw(src sysroot compat)) { die "$o{$_}: nicht vorhanden\n" unless -e $o{$_} }
++    or die "usage: $0 --src DIR --sysroot DIR --prefix DIR --build DIR --compat FILE [--jobs N] [--configure-only] [--extra-flags FLAGS]\n";
++for (qw(src sysroot prefix build compat)) { die "--$_ missing\n" unless $o{$_} }
++for (qw(src sysroot compat)) { die "$o{$_}: not found\n" unless -e $o{$_} }
 +
 +$ENV{OBJECT_MODE} = '64';
 +$ENV{PATH} = "/opt/freeware/bin:$ENV{PATH}";
 +my $cc  = '/opt/IBM/openxlC/17.1.3/bin/ibm-clang_r';
 +my $cxx = '/opt/IBM/openxlC/17.1.3/bin/ibm-clang++_r';
-+die "$cc fehlt\n" unless -x $cc;
++die "$cc missing\n" unless -x $cc;
 +
 +my $flags = "-m64 --sysroot=$o{sysroot} -include $o{compat} -D__LIBC_NO_CPP_MATH_OVERLOADS__ $o{'extra-flags'}";
-+# C++: Wrapper-Header mit extern "C" um die 7.1-C-Header (make_cxxwrap.pl)
++# C++: wrapper headers with extern "C" around the 7.1 C headers (make_cxxwrap.pl)
 +my $cxxflags = "$flags -isystem $o{sysroot}/cxxwrap";
-+die "$o{sysroot}/cxxwrap fehlt - erst make_cxxwrap.pl laufen lassen\n" unless -d "$o{sysroot}/cxxwrap";
-+# Bibliotheken zuerst aus dem Sysroot (der Treiber gibt kein -L fuer das Sysroot mit).
++die "$o{sysroot}/cxxwrap missing - run make_cxxwrap.pl first\n" unless -d "$o{sysroot}/cxxwrap";
++# Libraries from the sysroot first (the driver passes no -L for the sysroot).
 +my $ldflags = "-L$o{sysroot}/usr/lib";
 +
 +make_path($o{build});
@@ -314,8 +314,8 @@ index 0000000..29be787
 +    '-DLIBCXX_USE_COMPILER_RT=ON', '-DLIBCXXABI_USE_COMPILER_RT=ON', '-DLIBUNWIND_USE_COMPILER_RT=ON',
 +    '-DLIBCXX_ENABLE_STATIC_ABI_LIBRARY=ON',
 +    '-DLIBCXX_HARDENING_MODE=none',
-+    # __cxa_thread_atexit_impl gibt es erst in der 7.2-libc; der CMake-Test findet es ueber
-+    # die Host-Bibliotheken und wuerde ein Binary erzeugen, das auf 7.1 nicht laedt.
++    # __cxa_thread_atexit_impl exists only from the 7.2 libc on; the CMake test finds it through
++    # the host libraries and would produce a binary that does not load on 7.1.
 +    '-DLIBCXXABI_HAS_CXA_THREAD_ATEXIT_IMPL=OFF',
 +);
 +print "+ @cmake\n";
@@ -329,7 +329,7 @@ index 0000000..29be787
 +my @install = ('ninja', 'install-cxx', 'install-cxxabi', 'install-unwind');
 +print "+ @install\n";
 +system(@install) == 0 or die "ninja install rc=" . ($? >> 8) . "\n";
-+print "FERTIG: $o{prefix}\n";
++print "DONE: $o{prefix}\n";
 diff --git a/tools/aix/sysroot71/llvm-19.1.7-aix-cmake-quote.patch b/tools/aix/sysroot71/llvm-19.1.7-aix-cmake-quote.patch
 new file mode 100644
 index 0000000..d0b8af8
@@ -371,7 +371,7 @@ index 0000000..d0b8af8
 + endif()
 diff --git a/tools/aix/sysroot71/llvm-19.1.7-aix-cxa-thread-atexit.patch b/tools/aix/sysroot71/llvm-19.1.7-aix-cxa-thread-atexit.patch
 new file mode 100644
-index 0000000..c3143f5
+index 0000000..326e7c4
 --- /dev/null
 +++ b/tools/aix/sysroot71/llvm-19.1.7-aix-cxa-thread-atexit.patch
 @@ -0,0 +1,32 @@
@@ -389,7 +389,7 @@ index 0000000..c3143f5
 +   _LIBCXXABI_WEAK
 + #endif
 +   int __cxa_thread_atexit_impl(Dtor, void*, void*);
-++#endif // btop-aix: XCOFF kennt keine schwachen undefinierten Symbole; AIX 7.1 hat kein __cxa_thread_atexit_impl
+++#endif // btop-aix: XCOFF has no weak undefined symbols; AIX 7.1 has no __cxa_thread_atexit_impl
 + 
 + #ifndef HAVE___CXA_THREAD_ATEXIT_IMPL
 + 
@@ -398,7 +398,7 @@ index 0000000..c3143f5
 +     return __cxa_thread_atexit_impl(dtor, obj, dso_symbol);
 + #else
 ++#if defined(_AIX)
-++    {   // btop-aix: immer die eigene Implementierung (kein weak-Symbol auf XCOFF)
+++    {   // btop-aix: always use the own implementation (no weak symbol on XCOFF)
 ++#else
 +     if (__cxa_thread_atexit_impl) {
 +       return __cxa_thread_atexit_impl(dtor, obj, dso_symbol);
@@ -409,24 +409,24 @@ index 0000000..c3143f5
 +       static DtorsManager manager;
 diff --git a/tools/aix/sysroot71/make_cxxwrap.pl b/tools/aix/sysroot71/make_cxxwrap.pl
 new file mode 100755
-index 0000000..cedd021
+index 0000000..cec3297
 --- /dev/null
 +++ b/tools/aix/sysroot71/make_cxxwrap.pl
 @@ -0,0 +1,49 @@
 +#!/usr/bin/perl
-+# make_cxxwrap.pl -- Projekt btop-aix (2026-10-12)
++# make_cxxwrap.pl -- project btop-aix (2026-10-12)
 +#
-+# Zweck: Die C-Header von AIX 7.1 tragen keine extern-"C"-Klammern (die kamen
-+# erst mit 7.2; auf 7.1 erledigten das die IBM-Compiler intern). Mit Open XL
-+# gegen das 7.1-Sysroot bekommen isdigit(), catopen(), _Errno() usw. deshalb
-+# C++-Bindung, und der Link scheitert mit "_Z7isdigiti undefined".
-+# Dieses Skript erzeugt unter <sysroot>/cxxwrap fuer jeden Header einen
-+# Wrapper (auch fuer Header mit teilweiser Klammer, z. B. sys/socket.h):
++# Who/what: The AIX 7.1 C headers carry no extern "C" brackets (those came
++#           only with 7.2; on 7.1 the IBM compilers handled this internally). With Open XL
++#           against the 7.1 sysroot, isdigit(), catopen(), _Errno() etc. therefore get
++#           C++ linkage, and the link fails with "_Z7isdigiti undefined".
++#           This script creates under <sysroot>/cxxwrap one wrapper per header
++#           (also for headers with partial brackets, e.g. sys/socket.h):
 +#     extern "C" { #include_next <name> }
-+# Der Baum wird nur fuer C++ per "-isystem <sysroot>/cxxwrap" eingebunden,
-+# nach den libc++-Headern und vor dem Sysroot.
++#           The tree is included for C++ only, via "-isystem <sysroot>/cxxwrap",
++#           after the libc++ headers and before the sysroot.
 +#
-+# Aufruf (AIX-7.2-Build-Host mit Open XL): perl make_cxxwrap.pl --sysroot /build/btop-aix/sysroot71
++# Usage (AIX 7.2 build host with Open XL): perl make_cxxwrap.pl --sysroot /build/btop-aix/sysroot71
 +use strict;
 +use warnings;
 +use Getopt::Long;
@@ -435,8 +435,8 @@ index 0000000..cedd021
 +use File::Basename;
 +
 +my $sysroot;
-+GetOptions('sysroot=s' => \$sysroot) or die "Aufruf: $0 --sysroot DIR\n";
-+die "--sysroot fehlt\n" unless $sysroot && -d "$sysroot/usr/include";
++GetOptions('sysroot=s' => \$sysroot) or die "usage: $0 --sysroot DIR\n";
++die "--sysroot missing\n" unless $sysroot && -d "$sysroot/usr/include";
 +my $inc = "$sysroot/usr/include";
 +my $out = "$sysroot/cxxwrap";
 +my ($wrapped, $skipped) = (0, 0);
@@ -448,46 +448,46 @@ index 0000000..cedd021
 +    local $/;
 +    open my $fh, '<', $_ or do { warn "$_: $!\n"; return };
 +    my $src = <$fh>; close $fh;
-+    # Auch Header mit teilweiser extern-"C"-Klammer wrappen (sys/socket.h klammert socket() nicht):
-+    # eine zusaetzliche aeussere extern-"C"-Klammer ist harmlos.
++    # Also wrap headers with a partial extern "C" bracket (sys/socket.h does not bracket socket()):
++    # an additional outer extern "C" bracket is harmless.
 +    $skipped++ if $src =~ /extern\s+"C"/;
 +    my $dst = "$out/$rel";
 +    make_path(dirname($dst));
 +    open my $o, '>', $dst or die "$dst: $!";
-+    print $o "/* btop-aix cxxwrap: AIX-7.1-Header ohne extern \"C\" (make_cxxwrap.pl) */\n",
++    print $o "/* btop-aix cxxwrap: AIX 7.1 header without extern \"C\" (make_cxxwrap.pl) */\n",
 +             "#ifdef __cplusplus\nextern \"C\" {\n#endif\n",
 +             "#include_next <$rel>\n",
 +             "#ifdef __cplusplus\n}\n#endif\n";
 +    close $o;
 +    $wrapped++;
 +}}, $inc);
-+print "cxxwrap: $wrapped Header gewrappt ($skipped davon hatten schon teilweise extern \"C\") -> $out\n";
++print "cxxwrap: $wrapped headers wrapped ($skipped of them already had partial extern \"C\") -> $out\n";
 diff --git a/tools/aix/sysroot71/make_sysroot.pl b/tools/aix/sysroot71/make_sysroot.pl
 new file mode 100755
-index 0000000..9b0fb5d
+index 0000000..c747c3f
 --- /dev/null
 +++ b/tools/aix/sysroot71/make_sysroot.pl
 @@ -0,0 +1,94 @@
 +#!/usr/bin/perl
-+# make_sysroot.pl -- Projekt btop-aix (2026-10-12)
++# make_sysroot.pl -- project btop-aix (2026-10-12)
 +#
-+# Zweck: Legt auf dem AIX-7.2-Build-Host ein Sysroot einer aelteren AIX-Version (7.1 oder 6.1) aus den auf einem
-+# 7.1-System gepackten Tar-Dateien an und bringt es in den Zustand, mit dem
-+# libc++ 19 und btop gegen 7.1 gebaut werden (Belege: docs/aix-port.md, Abs. 5):
-+#   1. Tar-Dateien entpacken (usr/include, usr/ccs/lib, Auswahl usr/lib, libC.a).
-+#   2. Absolute Symlinks relativ machen - sonst zeigen z. B. usr/include/inttypes.h
-+#      oder usr/lib/libc.a auf die 7.2-Dateien des Build-Hosts.
-+#   3. crti_64.o des Build-Hosts (7.2) einsetzen: das 7.1-crti verlangt _cdtors und
-+#      libC-Symbole, die ld 7.2 nicht liefert; das 7.2-crti braucht nur atexit/exit.
-+#   4. math.h: C++-Overloads wie in 7.2 hinter __LIBC_NO_CPP_MATH_OVERLOADS__ legen
-+#      (libc++ definiert abs/... selbst, sonst "missing exception specification").
++# Who/what: On the AIX 7.2 build host, creates a sysroot of an older AIX level (7.1 or 6.1) from the tar files
++#           packed on a 7.1 system and brings it into the state with which
++#           libc++ 19 and btop are built against 7.1 (evidence: docs/aix-port.md, section 5):
++#   1. Unpack the tar files (usr/include, usr/ccs/lib, a selection of usr/lib, libC.a).
++#   2. Make absolute symlinks relative - otherwise e.g. usr/include/inttypes.h
++#      or usr/lib/libc.a point to the 7.2 files of the build host.
++#   3. Install the build host's (7.2) crti_64.o: the 7.1 crti requires _cdtors and
++#      libC symbols that ld 7.2 does not provide; the 7.2 crti needs only atexit/exit.
++#   4. math.h: put the C++ overloads behind __LIBC_NO_CPP_MATH_OVERLOADS__ as in 7.2
++#      (libc++ defines abs/... itself, otherwise "missing exception specification").
 +#
-+# Aufruf (AIX-7.2-Build-Host mit Open XL):
++# Usage (AIX 7.2 build host with Open XL):
 +#   perl make_sysroot.pl --root /build/btop-aix/sysroot71 --tag aix71 \
 +#        --tar /build/btop-aix/sysroot71.tar.gz --tar /build/btop-aix/sysroot71-libC.tar.gz
 +#   perl make_sysroot.pl --root /build/btop-aix/sysroot61 --tag aix61 --tar /build/btop-aix/sysroot61.tar.gz
-+#   (--tag: Suffix der Sicherungskopien crti_64.o.<tag>, math.h.orig.<tag>)
-+# Erzeugung der Tar-Dateien auf dem 7.1-Host: siehe docs/aix-port.md (tar ohne -h).
++#   (--tag: suffix of the backup copies crti_64.o.<tag>, math.h.orig.<tag>)
++# Creating the tar files on the 7.1 host: see docs/aix-port.md (tar without -h).
 +use strict;
 +use warnings;
 +use Getopt::Long;
@@ -500,22 +500,22 @@ index 0000000..9b0fb5d
 +$host_crti = '/usr/ccs/lib/crti_64.o';
 +$tag = 'aix71';
 +GetOptions('root=s' => \$root, 'tar=s' => \@tars, 'host-crti=s' => \$host_crti, 'tag=s' => \$tag)
-+    or die "Aufruf: $0 --root DIR --tar DATEI [--tar DATEI ...] [--host-crti DATEI] [--tag aix71|aix61]\n";
-+die "--root fehlt\n" unless $root;
-+die "--tar fehlt\n" unless @tars;
++    or die "usage: $0 --root DIR --tar FILE [--tar FILE ...] [--host-crti FILE] [--tag aix71|aix61]\n";
++die "--root missing\n" unless $root;
++die "--tar missing\n" unless @tars;
 +
 +make_path($root);
 +chdir $root or die "chdir $root: $!";
 +
-+# 1. entpacken
++# 1. unpack
 +for my $t (@tars) {
-+    die "$t: nicht vorhanden\n" unless -f $t;
++    die "$t: not found\n" unless -f $t;
 +    my $cmd = ($t =~ /\.gz$/) ? "gzip -dc '$t' | tar -xf -" : "tar -xf '$t'";
 +    print "+ $cmd\n";
-+    system($cmd) == 0 or die "entpacken von $t: rc=" . ($? >> 8) . "\n";
++    system($cmd) == 0 or die "unpacking $t: rc=" . ($? >> 8) . "\n";
 +}
 +
-+# 2. Symlinks relativ machen (nur Ziele, die im Sysroot existieren)
++# 2. make symlinks relative (only targets that exist in the sysroot)
 +my ($rewritten, $outside) = (0, 0);
 +open my $find, '-|', 'find', '.', '-type', 'l' or die "find: $!";
 +while (my $l = <$find>) {
@@ -531,17 +531,17 @@ index 0000000..9b0fb5d
 +        $rewritten++;
 +    } else {
 +        $outside++;
-+        print "  Hinweis: $l -> $target zeigt aus dem Sysroot heraus (bleibt)\n";
++        print "  Note: $l -> $target points outside the sysroot (kept)\n";
 +    }
 +}
 +close $find;
-+print "Symlinks: $rewritten relativ gemacht, $outside zeigen nach aussen\n";
++print "Symlinks: $rewritten made relative, $outside point outside\n";
 +
-+# 3. crti_64.o vom Build-Host
++# 3. crti_64.o from the build host
 +my $crti = "$root/usr/ccs/lib/crti_64.o";
 +if (-f $crti && !-f "$crti.$tag") { copy($crti, "$crti.$tag") or die "copy: $!" }
 +copy($host_crti, $crti) or die "copy $host_crti: $!";
-+print "crti_64.o: 7.2-Fassung eingesetzt, Original als crti_64.o.$tag\n";
++print "crti_64.o: 7.2 version installed, original kept as crti_64.o.$tag\n";
 +
 +# 4. math.h
 +my $math = "$root/usr/include/math.h";
@@ -552,13 +552,13 @@ index 0000000..9b0fb5d
 +    my $marker = '!defined(__LIBC_NO_CPP_MATH_OVERLOADS__)';
 +    if ($src !~ /\Q$marker\E/) {
 +        copy($math, "$math.orig.$tag") or die "copy: $!";
-+        my $n = ($src =~ s/^(#if\t!defined\(__COMPATMATH__\))[ \t]*$/$1 && $marker \/* btop-aix: wie AIX 7.2 *\//m);
-+        die "math.h: Muster nicht gefunden\n" unless $n;
++        my $n = ($src =~ s/^(#if\t!defined\(__COMPATMATH__\))[ \t]*$/$1 && $marker \/* btop-aix: as in AIX 7.2 *\//m);
++        die "math.h: pattern not found\n" unless $n;
 +        open my $out, '>', $math or die "$math: $!";
 +        print $out $src; close $out;
-+        print "math.h: C++-Overload-Schutz ergaenzt\n";
++        print "math.h: C++ overload guard added\n";
 +    } else {
-+        print "math.h: bereits gepatcht\n";
++        print "math.h: already patched\n";
 +    }
 +}
-+print "FERTIG: $root\n";
++print "DONE: $root\n";

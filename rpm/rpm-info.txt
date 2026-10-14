@@ -1,28 +1,30 @@
 Name        : btop
 Version     : 1.4.7
-Release     : 3
+Release     : 4
 Architecture: ppc
 Install Date: (not installed)
 Group       : Applications/System
-Size        : 8143077
+Size        : 8146857
 License     : Apache-2.0
 Signature   : (none)
-Source RPM  : btop-1.4.7-3.src.rpm
-Build Date  : Wed Oct 14 07:55:11 2026
+Source RPM  : btop-1.4.7-4.src.rpm
+Build Date  : Wed Oct 14 13:57:32 2026
 Build Host  : aix-btop-build
 Vendor      : aix-btop project
-URL         : https://github.com/aristocratos/btop
+URL         : https://github.com/mawelo/aix-btop
 Summary     : Resource monitor for the terminal (AIX port)
 Description :
 btop shows CPU, memory, disk, network and process usage in a terminal UI.
 This package carries the AIX port (perfstat, mntctl, getprocs64), built from
-btop commit 1b5aac5 with IBM Open XL C/C++ against the AIX 6.1 headers and
+btop commit 85e0204 with IBM Open XL C/C++ against the AIX 6.1 headers and
 libraries; it runs on AIX 6.1 TL7 and later, 7.1, 7.2 and 7.3 (the perfstat structure
 size is probed at run time).
 The binary links the C++ runtime statically and imports only libc, libpthreads
 and libperfstat. A UTF-8 locale is not required: /opt/btop/bin/btop adds
 --force-utf when none is active. Themes live in /opt/btop/share/btop/themes,
 the per user configuration in ~/.config/btop.
+Report AIX problems at https://github.com/mawelo/aix-btop/issues, not upstream
+(https://github.com/aristocratos/btop), which does not maintain the port.
 
 /bin/sh
 rpmlib(CompressedFileNames) <= 3.0.4-1

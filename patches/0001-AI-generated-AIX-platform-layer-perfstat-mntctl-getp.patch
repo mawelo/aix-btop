@@ -1,6 +1,6 @@
-From 85b16f4851a7ee3274ac97078898b263c8387514 Mon Sep 17 00:00:00 2001
+From be3f2c84f50646b18616892e2580e84209eff8dd Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Wed, 14 Oct 2026 07:52:03 +0200
+Date: Wed, 14 Oct 2026 13:54:39 +0200
 Subject: [PATCH 1/4] [AI generated] AIX: platform layer (perfstat, mntctl,
  getprocs64), getifaddrs replacement, executable path
 
@@ -19,7 +19,9 @@ built against a 6.1 sysroot, see the sysroot tooling):
   src/aix/aix_ifaddrs.{hpp,cpp} provide it on top of SIOCGIFCONF.
 * Processes: getprocs64 in blocks of 512 procentry64 plus getargs; kernel
   "wait" processes hidden; nice = pi_nice - 20; RSS from pi_drss + pi_trss;
-  pi_ioch as I/O counter.
+  pi_ioch as I/O counter; control characters in names and arguments are shown
+  as "?" (they are chosen by the process owner); a reused pid is detected by
+  its start time.
 * WPAR: container_engine = "WPAR" when wpar_getcid() != 0.
 * System uptime from lbolt / clock ticks.
 
@@ -35,11 +37,11 @@ Not available on AIX: sensors, battery, GPU.
  src/aix/aix_ifaddrs.hpp  |   56 ++
  src/aix/aix_selfpath.cpp |   75 ++
  src/aix/aix_selfpath.hpp |   34 +
- src/aix/btop_collect.cpp | 1449 ++++++++++++++++++++++++++++++++++++++
+ src/aix/btop_collect.cpp | 1487 ++++++++++++++++++++++++++++++++++++++
  src/btop.cpp             |   15 +-
  src/btop_menu.cpp        |   10 +
  src/btop_shared.hpp      |    6 +-
- 8 files changed, 1765 insertions(+), 2 deletions(-)
+ 8 files changed, 1803 insertions(+), 2 deletions(-)
  create mode 100644 src/aix/aix_ifaddrs.cpp
  create mode 100644 src/aix/aix_ifaddrs.hpp
  create mode 100644 src/aix/aix_selfpath.cpp
@@ -238,11 +240,11 @@ index 0000000..ab6d283
 +#endif // _AIX
 diff --git a/src/aix/aix_selfpath.cpp b/src/aix/aix_selfpath.cpp
 new file mode 100644
-index 0000000..a62fc6b
+index 0000000..2ea0303
 --- /dev/null
 +++ b/src/aix/aix_selfpath.cpp
 @@ -0,0 +1,75 @@
-+/* Copyright 2026 btop-aix project
++/* Copyright 2026 Martin Lonkwitz (btop-aix)
 +
 +   Licensed under the Apache License, Version 2.0 (the "License");
 +   you may not use this file except in compliance with the License.
@@ -319,11 +321,11 @@ index 0000000..a62fc6b
 +}
 diff --git a/src/aix/aix_selfpath.hpp b/src/aix/aix_selfpath.hpp
 new file mode 100644
-index 0000000..a8fdb60
+index 0000000..83bb618
 --- /dev/null
 +++ b/src/aix/aix_selfpath.hpp
 @@ -0,0 +1,34 @@
-+/* Copyright 2026 btop-aix project
++/* Copyright 2026 Martin Lonkwitz (btop-aix)
 +
 +   Licensed under the Apache License, Version 2.0 (the "License");
 +   you may not use this file except in compliance with the License.
@@ -359,10 +361,10 @@ index 0000000..a8fdb60
 +}
 diff --git a/src/aix/btop_collect.cpp b/src/aix/btop_collect.cpp
 new file mode 100644
-index 0000000..83ab82a
+index 0000000..406d0f0
 --- /dev/null
 +++ b/src/aix/btop_collect.cpp
-@@ -0,0 +1,1449 @@
+@@ -0,0 +1,1487 @@
 +/* Copyright 2026 Martin Lonkwitz (btop-aix)
 +
 +   Licensed under the Apache License, Version 2.0 (the "License");
@@ -914,8 +916,20 @@ index 0000000..83ab82a
 +			Logger::warning("mntctl(MCTL_QUERY) size query failed: {}", strerror(errno));
 +			return result;
 +		}
-+		vector<char> buf(static_cast<size_t>(size));
-+		const int count = mntctl(MCTL_QUERY, size, buf.data());
++		//? mntctl returns 0 and stores the needed size in the first int when the buffer is too small; that
++		//? happens when a file system is mounted between the size query and the read, so retry a few times
++		vector<char> buf;
++		int count = 0;
++		for (int attempt = 0; attempt < 4 and count == 0; attempt++) {
++			buf.assign(static_cast<size_t>(size), 0);
++			count = mntctl(MCTL_QUERY, size, buf.data());
++			if (count == 0) {
++				int needed = 0;
++				std::memcpy(&needed, buf.data(), sizeof needed);
++				if (needed <= size) break;
++				size = needed;
++			}
++		}
 +		if (count <= 0) {
 +			Logger::warning("mntctl(MCTL_QUERY) failed: {}", strerror(errno));
 +			return result;
@@ -1034,7 +1048,8 @@ index 0000000..83ab82a
 +			const int64_t wr = (int64_t)(d.wblks * d.bsize);
 +			//? d.time = accumulated milliseconds the disk was busy
 +			int64_t activity = 0;
-+			if (auto it = old_disk_time.find(name); it != old_disk_time.end() and uptime > old_uptime) {
++			//? a counter that went backwards (hdisk reconfigured) gives no sample instead of a wrapped difference
++			if (auto it = old_disk_time.find(name); it != old_disk_time.end() and uptime > old_uptime and d.time >= it->second) {
 +				activity = (int64_t)round((double)(d.time - it->second) * 100 / ((uptime - old_uptime) * 1000));
 +			}
 +			old_disk_time[name] = d.time;
@@ -1445,6 +1460,19 @@ index 0000000..83ab82a
 +		}
 +	}
 +
++	//? Replace C0 controls, DEL and UTF-8 encoded C1 controls (U+0080..U+009F) by '?'; O(n)
++	void replace_control_chars(string& s) {
++		for (size_t i = 0; i < s.size(); i++) {
++			const auto c = static_cast<unsigned char>(s[i]);
++			if (c < 0x20 or c == 0x7f) {
++				s[i] = '?';
++			} else if (c == 0xc2 and i + 1 < s.size()) {
++				const auto n = static_cast<unsigned char>(s[i + 1]);
++				if (n >= 0x80 and n <= 0x9f) s.replace(i, 2, "?");
++			}
++		}
++	}
++
 +	//? Map procentry64::pi_state to the btop one-letter state
 +	char state_char(unsigned pi_state, bool used_cpu) {
 +		switch (pi_state) {
@@ -1584,6 +1612,11 @@ index 0000000..83ab82a
 +						else continue;
 +					}
 +					else if (dead_procs.contains(pid)) continue;
++					//? pid reused by a new process since the last update: drop cached name, command and user
++					else if (find_old->cpu_s != (uint64_t)pe.pi_start) {
++						*find_old = proc_info{pid};
++						no_cache = true;
++					}
 +
 +					auto &new_proc = *find_old;
 +
@@ -1598,6 +1631,7 @@ index 0000000..83ab82a
 +								const size_t len = strnlen(p, end - p);
 +								new_proc.cmd.append(p, len);
 +								new_proc.cmd += ' ';
++								if (len >= static_cast<size_t>(end - p)) break;
 +								p += len + 1;
 +							}
 +							if (not new_proc.cmd.empty()) new_proc.cmd.pop_back();
@@ -1607,6 +1641,9 @@ index 0000000..83ab82a
 +							new_proc.cmd.resize(1000);
 +							new_proc.cmd.shrink_to_fit();
 +						}
++						//? name and arguments are chosen by the process owner; keep terminal controls off the screen
++						replace_control_chars(new_proc.name);
++						replace_control_chars(new_proc.cmd);
 +						new_proc.ppid = pe.pi_ppid;
 +						new_proc.cpu_s = (uint64_t)pe.pi_start;
 +						if (auto it = uid_user.find(pe.pi_uid); it != uid_user.end()) {
@@ -1622,9 +1659,12 @@ index 0000000..83ab82a
 +					//? CPU time in clock ticks (user + system). The tv_usec fields of procentry64.pi_ru hold
 +					//? nanoseconds, not microseconds (measured with tools/aix/probes/rusage_probe.c: 147220062 per
 +					//? half second of a busy loop); read as microseconds a busy loop showed 3200 % on 32 CPUs.
-+					const uint64_t cpu_ns = (uint64_t)(pe.pi_ru.ru_utime.tv_sec + pe.pi_ru.ru_stime.tv_sec) * 1'000'000'000
-+						+ (uint64_t)pe.pi_ru.ru_utime.tv_usec + (uint64_t)pe.pi_ru.ru_stime.tv_usec;
-+					const uint64_t cpu_t = cpu_ns * (uint64_t)Shared::clk_tck / 1'000'000'000;
++					//? Seconds and nanoseconds are scaled separately: (seconds * 1e9 + ns) * clk_tck overflows 64 bits
++					//? after about 5.8 CPU years, which a process with 64 busy threads reaches in about 33 days.
++					const uint64_t cpu_sec = (uint64_t)pe.pi_ru.ru_utime.tv_sec + (uint64_t)pe.pi_ru.ru_stime.tv_sec;
++					const uint64_t cpu_nsec = (uint64_t)pe.pi_ru.ru_utime.tv_usec + (uint64_t)pe.pi_ru.ru_stime.tv_usec;
++					const uint64_t cpu_t = cpu_sec * (uint64_t)Shared::clk_tck
++						+ cpu_nsec * (uint64_t)Shared::clk_tck / 1'000'000'000;
 +
 +					new_proc.state = state_char(pe.pi_state, cpu_t > new_proc.cpu_t);
 +

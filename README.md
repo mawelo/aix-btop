@@ -8,7 +8,7 @@ terminal) to IBM AIX, and a ready-to-install package for AIX 6.1 TL7 up to 7.3.
 | Where | Content |
 |---|---|
 | [Releases](https://github.com/mawelo/aix-btop/releases) | `btop-<version>-<release>.aix6.1.ppc.rpm` (signed) and the same tree as `.tar.gz`, with `SHA256SUMS` + `SHA256SUMS.asc` (one package for AIX 6.1 TL7 to 7.3; "aix6.1" is the minimum release, rpm on 7.1 to 7.3 accepts it through its OS compatibility table) |
-| [`aix-public`](https://github.com/mawelo/btop/tree/aix-public) branch of the fork `mawelo/btop` | the same four patches as commits on top of the upstream base; `btop --version` of the package names a commit of this branch; the branch is rebuilt per release, so each release commit also carries a tag there (`v1.4.7-aix2`, `v1.4.7-aix3`) |
+| [`aix-public`](https://github.com/mawelo/btop/tree/aix-public) branch of the fork `mawelo/btop` | the same four patches as commits on top of the upstream base; `btop --version` of the package names a commit of this branch; the branch is rebuilt per release, so each release commit also carries a tag there (`v1.4.7-aix2` to `v1.4.7-aix4`) |
 | `patches/` | Patch series for the upstream repository (`git am`), base commit in `patches/BASE-COMMIT.txt` |
 | `rpm/` | metadata of the current release (`rpm-info.txt`, `BUILD.txt`, `SHA256SUMS` + `SHA256SUMS.asc`); the packages themselves are attached to the [release](https://github.com/mawelo/aix-btop/releases/latest), `rpm/README.md` has direct links |
 | `img/` | screenshot (AIX 7100-05) |
@@ -65,11 +65,15 @@ CMake gains the cache variable `BTOP_GIT_COMMIT` (used only when set).
 One package, built against the AIX 6.1 headers and libraries, for every release from AIX 6.1 TL7 to 7.3.
 The 7.1 build stays in the tree as a build check but is not shipped.
 
+**Releases 1 and 2 are withdrawn:** they shipped group-writable themes (the release 1 tar also with owner
+uid/gid 1000 of the build host). If one of them is installed, upgrade to the latest release or run
+`chown -R root:system /opt/btop && chmod -R go-w /opt/btop`. See `SECURITY.md`.
+
 | File | Built against | Tested on | Expected to run on |
 |---|---|---|---|
 | `btop-<version>-<release>.aix6.1.ppc.rpm` (and the same tree as `.tar.gz`), attached to each [release](https://github.com/mawelo/aix-btop/releases) | AIX 6100-09 sysroot, static libc++ 19 | see the matrix below | AIX 6.1 TL7 and later, 7.1, 7.2, 7.3 (every technology level), because of the reasons given below |
 
-Test matrix of release 3 (`1b5aac5`), at least one run each on 2026-10-14; "load" = two single-threaded busy loops started
+Test matrix of release 4 (`85e0204`), one run each on 2026-10-14; "load" = two single-threaded busy loops started
 next to btop, "launcher" = `opt/btop/bin/btop` started through a symlink in another directory, without `LANG`:
 
 | AIX level | rpm.rte | Installed via | Started | Under load | Removed again |
@@ -78,16 +82,19 @@ next to btop, "launcher" = `opt/btop/bin/btop` started through a symlink in anot
 | 6100-09-04 | n/a (non-root user) | tar, in a private directory | yes, launcher | yes | yes |
 | 7100-02-01 | 3.0.5 | tar, in a private directory | yes, launcher | yes | yes |
 | 7100-05-03 | 4.13.0 | `rpm -ivh`, `rpm -V` | yes, through `/usr/bin/btop` | no | `rpm -e`, no files left |
-| 7200-05-05 | 4.15.1 | tar, in a private directory; the RPM was installed with `rpm -ivh` and `rpm -V` found no deviation, see below | yes, launcher | yes | yes; `rpm -e`, no files left |
-| 7300-02-01 | 4.18.1 | `rpm -Uvh` over release 1, `rpm -V` | `--version` only | no | no (kept installed) |
+| 7200-05-05 | 4.15.1 | tar, in a private directory (with release 3 also `rpm -ivh` and `rpm -V`, see below) | yes, launcher | yes | yes; `rpm -e`, no files left |
+| 7300-02-01 | 4.18.1 | not repeated with release 4 (release 3: `rpm -Uvh`, `rpm -V`, `--version`) | - | - | - |
 | 7300-04-00 | 4.20.1 | `rpm -ivh`, `rpm -V` | yes, through `/usr/bin/btop` | yes | `rpm -e`, no files left |
 
-On the 7200-05 test host `rpm -ivh` returned 1 and both `rpm -ivh` and `rpm -e` printed `rpm_share: 0645-007 ATTENTION:
-whichfs() returned an unexpected result`, although the files were installed and removed correctly. That host also mounts `/usr` and `/opt` a
-second time (read-only namefs, for a container build root), so `rpm_share` cannot tell which file system `/opt` is on.
+On every tar host, `sh btop` and `ksh btop` inside `opt/btop/bin` started the binary next to them although another
+`btop` came first in `PATH`, and a busy process whose name contained ESC and BEL showed up as `x?]0;PWNED?y`.
+
+With release 3, on the 7200-05 test host `rpm -ivh` returned 1 and both `rpm -ivh` and `rpm -e` printed `rpm_share: 0645-007 ATTENTION:
+whichfs() returned an unexpected result`, although the files were installed and removed correctly. The cause is a
+host-specific mount layout that `rpm_share` cannot map to a file system.
 This is a property of the host, not of the package.
 
-Not tested: 6.1 TL8, 7.1 TL0/TL1/TL3/TL4, 7.2 TL0 to TL4, 7.3 TL0/TL1/TL3 (TL2: install and `--version` only). Note that AIX 6.1 and 7.1 are out of
+Not tested: 6.1 TL8, 7.1 TL0/TL1/TL3/TL4, 7.2 TL0 to TL4, 7.3 TL0/TL1/TL2/TL3. Note that AIX 6.1 and 7.1 are out of
 IBM support; the port does not change that.
 
 Why one binary is expected to cover all of them:
@@ -126,17 +133,17 @@ when `TERM` is empty. The RPM refuses to install over a `/usr/bin/btop` that is 
 
 ```sh
 # RPM
-rpm -ivh btop-1.4.7-3.aix6.1.ppc.rpm
+rpm -ivh btop-1.4.7-4.aix6.1.ppc.rpm
 btop                                   # /usr/bin/btop -> /opt/btop/bin/btop -> /opt/btop/bin/btop.bin
 rpm -e btop
 
 # tar (rpm.rte 3.0.5): the archive contains only opt/btop
-cd / && gzip -dc btop-1.4.7-3.aix6.1.ppc.tar.gz | tar -xf -
+cd / && gzip -dc btop-1.4.7-4.aix6.1.ppc.tar.gz | tar -xf -
 ln -s /opt/btop/bin/btop /usr/bin/btop   # optional
 rm -rf /opt/btop /usr/bin/btop           # uninstall
 
 # tar without root, into any directory
-mkdir ~/btop && cd ~/btop && gzip -dc /path/to/btop-1.4.7-3.aix6.1.ppc.tar.gz | tar -xf -
+mkdir ~/btop && cd ~/btop && gzip -dc /path/to/btop-1.4.7-4.aix6.1.ppc.tar.gz | tar -xf -
 ~/btop/opt/btop/bin/btop                 # the launcher starts the btop.bin next to it (symlinks are followed)
 ```
 
@@ -167,7 +174,7 @@ with the one shown on the GitHub profile or in the release notes, not only with 
 ```sh
 # on AIX with rpm.rte 4.15 or newer (tested: 4.15.1 on 7200-05, 4.20.1 on 7300-04)
 rpm --import KEYS
-rpm -K btop-1.4.7-3.aix6.1.ppc.rpm          # "digests signatures OK"
+rpm -K btop-1.4.7-4.aix6.1.ppc.rpm          # "digests signatures OK"
 
 # anywhere with GnuPG
 gpg --import KEYS
