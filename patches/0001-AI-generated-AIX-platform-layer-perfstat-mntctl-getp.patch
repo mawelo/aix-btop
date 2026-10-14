@@ -1,6 +1,6 @@
-From 5441851c6ea70e681c598a974139ad509c413f26 Mon Sep 17 00:00:00 2001
+From 85b16f4851a7ee3274ac97078898b263c8387514 Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Tue, 13 Oct 2026 18:44:14 +0200
+Date: Wed, 14 Oct 2026 07:52:03 +0200
 Subject: [PATCH 1/4] [AI generated] AIX: platform layer (perfstat, mntctl,
  getprocs64), getifaddrs replacement, executable path
 
@@ -359,7 +359,7 @@ index 0000000..a8fdb60
 +}
 diff --git a/src/aix/btop_collect.cpp b/src/aix/btop_collect.cpp
 new file mode 100644
-index 0000000..4beaf96
+index 0000000..83ab82a
 --- /dev/null
 +++ b/src/aix/btop_collect.cpp
 @@ -0,0 +1,1449 @@
@@ -467,10 +467,10 @@ index 0000000..4beaf96
 +	//? a larger value with EINVAL: built against the 6100-09 headers perfstat_cpu_t is 624 bytes, the
 +	//? 6100-07 library accepts 616 and perfstat_netinterface_t 224 instead of 240 (7100-02: cpu 616 for a
 +	//? 7100-05 build with 640; measured with tools/aix/probes/perfstat_size_probe.c, the CPU box stayed
-+	//? empty). Every field btop reads lies below the smallest accepted size (highest offsets: cpu_t 88,
-+	//? netinterface_t 176, disk_t 256, logicalvolume_t 208, cpu_total_t 224, memory_total_t 336 with
-+	//? real_avail since 6.1 TL7; table tools/aix/probes/perfstat_layout/offsets_5.3-7.3.txt), fields beyond
-+	//? it read as zero. The accepted size is probed once per call; array entries are copied out of a raw
++	//? empty). Sizes do not only grow (netinterface_t: 240 in 6.1.8, 224 in 7.1.0/7.1.1). Every field btop
++	//? reads ends within the smallest structure size (last byte read: cpu_t 96, netinterface_t 184, disk_t 264,
++	//? logicalvolume_t 216, cpu_total_t 224, memory_total_t 336 for real_avail, which exists since 6.1 TL7;
++	//? table tools/aix/probes/perfstat_layout/offsets_5.3-7.3.txt), fields beyond it read as zero. The accepted size is probed once per call; array entries are copied out of a raw
 +	//? buffer with that stride, single structures are read the same way.
 +	//? stride/probed are atomic: Tools::system_uptime() reads cpu_total from the main thread while the
 +	//? runner thread collects; two threads probing at the same time store the same result.
