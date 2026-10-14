@@ -10,7 +10,7 @@ terminal) to IBM AIX, and a ready-to-install package for AIX 6.1 TL7 up to 7.3.
 | [Releases](https://github.com/mawelo/aix-btop/releases) | `btop-<version>-<release>.aix6.1.ppc.rpm` (signed) and the same tree as `.tar.gz`, with `SHA256SUMS` + `SHA256SUMS.asc` (one package for AIX 6.1 TL7 to 7.3; "aix6.1" is the minimum release, rpm on 7.1 to 7.3 accepts it through its OS compatibility table) |
 | [`aix-public`](https://github.com/mawelo/btop/tree/aix-public) branch of the fork `mawelo/btop` | the same four patches as commits on top of the upstream base; `btop --version` of the package names a commit of this branch; the branch is rebuilt per release, so each release commit also carries a tag there (`v1.4.7-aix2`, `v1.4.7-aix3`) |
 | `patches/` | Patch series for the upstream repository (`git am`), base commit in `patches/BASE-COMMIT.txt` |
-| `rpm/` | `rpm-info.txt`, `BUILD.txt`, `SHA256SUMS` + `SHA256SUMS.asc` of the current release |
+| `rpm/` | metadata of the current release (`rpm-info.txt`, `BUILD.txt`, `SHA256SUMS` + `SHA256SUMS.asc`); the packages themselves are attached to the [release](https://github.com/mawelo/aix-btop/releases/latest), `rpm/README.md` has direct links |
 | `img/` | screenshot (AIX 7100-05) |
 | `KEYS` | public key that signs the RPM and `SHA256SUMS` |
 
