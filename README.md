@@ -69,21 +69,23 @@ The 7.1 build stays in the tree as a build check but is not shipped.
 |---|---|---|---|
 | `btop-<version>-<release>.aix6.1.ppc.rpm` (and the same tree as `.tar.gz`), attached to each [release](https://github.com/mawelo/aix-btop/releases) | AIX 6100-09 sysroot, static libc++ 19 | see the matrix below | AIX 6.1 TL7 and later, 7.1, 7.2, 7.3 (every technology level), because of the reasons given below |
 
-Test matrix (one run each; "load" = two single-threaded busy loops started next to btop). Only the 7100-05 row
-ran with the shipped release 3; the other rows ran on 2026-10-12 with earlier CI builds of the same port, before
-release 1. Since then the launcher (symlinks), the size probe (thread-safe, `*_total` calls, retry), `%pre` and
-the file modes changed; these rows have not been repeated with release 3.
+Test matrix of release 3 (`1b5aac5`), one run each on 2026-10-14; "load" = two single-threaded busy loops started
+next to btop, "launcher" = `opt/btop/bin/btop` started through a symlink in another directory, without `LANG`:
 
-| AIX level | Build tested | rpm.rte | Installed via | Started | Under load | Removed again |
-|---|---|---|---|---|---|---|
-| 6100-07-10 | `8269d77` | n/a (non-root user) | tar, in a private directory | yes, `btop.bin --force-utf` directly | yes | yes |
-| 6100-09-04 | `9298060` | n/a (non-root user) | tar, in a private directory | yes, `btop.bin --force-utf` directly | yes | yes |
-| 7100-02-01 | `9298060` | 3.0.5 | tar; the RPM only passed `rpm -ivh --test` | yes | yes | yes |
-| 7100-05-03 | `1b5aac5` = release 3 (2026-10-14) | 4.13.0 | `rpm -ivh`, `rpm -V` | yes, through `/usr/bin/btop` without `LANG` | no | `rpm -e`, no files left |
-| 7200-05-05 | `9226516` | 4.15.1 | `rpm -ivh` | yes | yes | `rpm -e`, no files left |
-| 7300-04-00 | `9226516` | 4.20.1 | `rpm -ivh` | yes | yes | `rpm -e`, no files left |
+| AIX level | rpm.rte | Installed via | Started | Under load | Removed again |
+|---|---|---|---|---|---|
+| 6100-07-10 | n/a (non-root user) | tar, in a private directory | yes, launcher | yes | yes |
+| 6100-09-04 | n/a (non-root user) | tar, in a private directory | yes, launcher | yes | yes |
+| 7100-02-01 | 3.0.5 | tar, in a private directory | yes, launcher | yes | yes |
+| 7100-05-03 | 4.13.0 | `rpm -ivh`, `rpm -V` | yes, through `/usr/bin/btop` | no | `rpm -e`, no files left |
+| 7300-02-01 | 4.18.1 | `rpm -Uvh` over release 1, `rpm -V` | `--version` only | no | no (kept installed) |
+| 7300-04-00 | 4.20.1 | `rpm -ivh`, `rpm -V` | yes, through `/usr/bin/btop` | yes | `rpm -e`, no files left |
 
-Not tested: 6.1 TL8, 7.1 TL0/TL1/TL3/TL4, 7.2 TL0 to TL4, 7.3 TL0 to TL3. Note that AIX 6.1 and 7.1 are out of
+7200-05-05: release 3 not tested; `rpm -ivh` stopped on the test host with `rpm_share: 0645-007 ... whichfs()`, the
+cause is not known yet. An earlier build (`9226516`, internal CI build before release 1, not published) was installed
+with `rpm -ivh`, ran under load and was removed with `rpm -e` there.
+
+Not tested: 6.1 TL8, 7.1 TL0/TL1/TL3/TL4, 7.2 TL0 to TL4 (TL5 see above), 7.3 TL0/TL1/TL3 (TL2: install and `--version` only). Note that AIX 6.1 and 7.1 are out of
 IBM support; the port does not change that.
 
 Why one binary is expected to cover all of them:
