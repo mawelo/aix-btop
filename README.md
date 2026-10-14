@@ -66,8 +66,8 @@ One package, built against the AIX 6.1 headers and libraries, for every release 
 The 7.1 build stays in the tree as a build check but is not shipped.
 
 **Releases 1 and 2 are withdrawn:** they shipped group-writable themes (the release 1 tar also with owner
-uid/gid 1000 of the build host). If one of them is installed, upgrade to the latest release or run
-`chown -R root:system /opt/btop && chmod -R go-w /opt/btop`. See `SECURITY.md`.
+uid/gid 1000 of the build host). Releases 1 to 3 also show control characters in process names
+(advisory GHSA-p45r-rq5h-mrcj). If one of releases 1 to 3 is installed, upgrade to the latest release. See `SECURITY.md`.
 
 | File | Built against | Tested on | Expected to run on |
 |---|---|---|---|

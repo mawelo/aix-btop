@@ -15,11 +15,12 @@ Only the latest release receives fixes.
 |---|---|
 | `v1.4.7-aix4` and later | supported |
 | `v1.4.7-aix3` | superseded: control characters in process names reached the terminal of the user running btop (fixed in `v1.4.7-aix4`) |
-| `v1.4.7-aix1`, `v1.4.7-aix2` | withdrawn: the themes were group-writable (release 1 tar: also owned by uid/gid 1000) |
+| `v1.4.7-aix1`, `v1.4.7-aix2` | withdrawn: the themes were group-writable (release 1 tar: also owned by uid/gid 1000); control characters as in release 3 |
 
-If release 3 is installed, upgrade with `rpm -Uvh` (or unpack the release 4 tar archive).
+If release 1, 2 or 3 is installed, upgrade with `rpm -Uvh` (or unpack the release 4 tar archive); see advisory
+[GHSA-p45r-rq5h-mrcj](https://github.com/mawelo/aix-btop/security/advisories/GHSA-p45r-rq5h-mrcj).
 
-If release 1 or 2 is installed, upgrade (`rpm -Uvh`) or fix the modes and owner:
+For release 1 or 2, the following closes only the file-mode problem, not the control-character problem:
 
 ```sh
 chown -R root:system /opt/btop
