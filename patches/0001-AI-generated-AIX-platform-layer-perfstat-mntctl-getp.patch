@@ -1,7 +1,7 @@
-From be3f2c84f50646b18616892e2580e84209eff8dd Mon Sep 17 00:00:00 2001
+From f8a47954d972a1daa09f721489571ccd14d959d1 Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Wed, 14 Oct 2026 13:54:39 +0200
-Subject: [PATCH 1/4] [AI generated] AIX: platform layer (perfstat, mntctl,
+Date: Sat, 31 Oct 2026 12:54:45 +0100
+Subject: [PATCH 1/5] [AI generated] AIX: platform layer (perfstat, mntctl,
  getprocs64), getifaddrs replacement, executable path
 
 Add src/aix/btop_collect.cpp for IBM AIX 7.1 and later (also runs on 6.1 when
@@ -19,9 +19,10 @@ built against a 6.1 sysroot, see the sysroot tooling):
   src/aix/aix_ifaddrs.{hpp,cpp} provide it on top of SIOCGIFCONF.
 * Processes: getprocs64 in blocks of 512 procentry64 plus getargs; kernel
   "wait" processes hidden; nice = pi_nice - 20; RSS from pi_drss + pi_trss;
-  pi_ioch as I/O counter; control characters in names and arguments are shown
-  as "?" (they are chosen by the process owner); a reused pid is detected by
-  its start time.
+  pi_ioch as I/O counter; control characters and invalid UTF-8 in names and
+  arguments are shown as "?" (they are chosen by the process owner); a reused
+  pid is detected by its start time.
+* A mount point that statvfs cannot query is logged once and then skipped.
 * WPAR: container_engine = "WPAR" when wpar_getcid() != 0.
 * System uptime from lbolt / clock ticks.
 
@@ -29,19 +30,33 @@ Shared code: pthread_join instead of pthread_timedjoin_np (not on AIX), the AIX
 signal table in the menu (26 unassigned, 27 SIGMSG, 28 SIGWINCH, 29 SIGPWR),
 and src/aix/aix_selfpath.cpp, which finds the executable directory through
 getprocs64/getargs (no /proc/self/exe on AIX) so that ../share/btop/themes
-next to the binary is found.
+next to the binary is found. Aix::canonical resolves paths with a PATH_MAX
+buffer, because realpath(path, NULL) returns EINVAL on AIX 6.1 and 7.2 TL5
+and std::filesystem::canonical of libc++ 19 relies on it.
+
+Shared fixes found on AIX:
+* Input::poll (src/btop_input.cpp): on AIX select() with pthread_sigmask
+  instead of pselect(); pselect on AIX 6.1 and 7.1 ignores tv_nsec, so the
+  main loop spun for up to one second per update cycle.
+* Term::refresh (src/btop_tools.cpp): the "Couldn't determine terminal size"
+  error is logged once, not on every call.
+* Fx::reset is defined next to Fx::reset_base (src/btop_tools.cpp instead of
+  src/btop_theme.cpp), so its initialization order is fixed.
 
 Not available on AIX: sensors, battery, GPU.
 ---
- src/aix/aix_ifaddrs.cpp  |  122 ++++
+ src/aix/aix_ifaddrs.cpp  |  122 +++
  src/aix/aix_ifaddrs.hpp  |   56 ++
- src/aix/aix_selfpath.cpp |   75 ++
- src/aix/aix_selfpath.hpp |   34 +
- src/aix/btop_collect.cpp | 1487 ++++++++++++++++++++++++++++++++++++++
- src/btop.cpp             |   15 +-
- src/btop_menu.cpp        |   10 +
+ src/aix/aix_selfpath.cpp |   80 ++
+ src/aix/aix_selfpath.hpp |   39 +
+ src/aix/btop_collect.cpp | 1526 ++++++++++++++++++++++++++++++++++++++
+ src/btop.cpp             |   31 +-
+ src/btop_input.cpp       |   18 +
+ src/btop_menu.cpp        |   23 +-
  src/btop_shared.hpp      |    6 +-
- 8 files changed, 1803 insertions(+), 2 deletions(-)
+ src/btop_theme.cpp       |    1 -
+ src/btop_tools.cpp       |   11 +-
+ 11 files changed, 1900 insertions(+), 13 deletions(-)
  create mode 100644 src/aix/aix_ifaddrs.cpp
  create mode 100644 src/aix/aix_ifaddrs.hpp
  create mode 100644 src/aix/aix_selfpath.cpp
@@ -240,10 +255,10 @@ index 0000000..ab6d283
 +#endif // _AIX
 diff --git a/src/aix/aix_selfpath.cpp b/src/aix/aix_selfpath.cpp
 new file mode 100644
-index 0000000..2ea0303
+index 0000000..94333c6
 --- /dev/null
 +++ b/src/aix/aix_selfpath.cpp
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,80 @@
 +/* Copyright 2026 Martin Lonkwitz (btop-aix)
 +
 +   Licensed under the Apache License, Version 2.0 (the "License");
@@ -266,10 +281,10 @@ index 0000000..2ea0303
 +#include "aix_selfpath.hpp"
 +
 +#include <array>
++#include <climits>
 +#include <cstdlib>
 +#include <string>
 +#include <string_view>
-+#include <system_error>
 +
 +#include <procinfo.h>
 +#include <sys/types.h>
@@ -308,23 +323,28 @@ index 0000000..2ea0303
 +		}
 +	}
 +
++	auto canonical(const fs::path& p) -> fs::path {
++		std::array<char, PATH_MAX + 1> buf{};
++		if (::realpath(p.c_str(), buf.data()) == nullptr) return {};
++		return fs::path{buf.data()};
++	}
++
 +	auto executable_dir() -> fs::path {
 +		const std::string argv0 = own_argv0();
 +		if (argv0.empty()) return {};
 +		const fs::path found = (argv0.find('/') != std::string::npos) ? fs::path{argv0} : search_path(argv0);
 +		if (found.empty()) return {};
-+		std::error_code ec;
-+		fs::path resolved = fs::canonical(found, ec);
-+		if (ec) return {};
++		fs::path resolved = Aix::canonical(found);
++		if (resolved.empty()) return {};
 +		return resolved.remove_filename();
 +	}
 +}
 diff --git a/src/aix/aix_selfpath.hpp b/src/aix/aix_selfpath.hpp
 new file mode 100644
-index 0000000..83bb618
+index 0000000..f19d111
 --- /dev/null
 +++ b/src/aix/aix_selfpath.hpp
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,39 @@
 +/* Copyright 2026 Martin Lonkwitz (btop-aix)
 +
 +   Licensed under the Apache License, Version 2.0 (the "License");
@@ -358,13 +378,18 @@ index 0000000..83bb618
 +	//* Directory of the running executable with trailing separator (like fs::path::remove_filename()),
 +	//* empty when it cannot be determined (the caller then falls back to /usr/share/btop/themes).
 +	[[nodiscard]] auto executable_dir() -> std::filesystem::path;
++
++	//* Like std::filesystem::canonical, empty on failure. libc++ calls realpath(p, NULL), which the libc of
++	//* AIX 6.1 TL7/TL9 and 7.2 TL5 rejects with EINVAL (tools/aix/probes/realpath_probe.c, 2026-10-19);
++	//* this uses a PATH_MAX buffer, which every level accepts.
++	[[nodiscard]] auto canonical(const std::filesystem::path& p) -> std::filesystem::path;
 +}
 diff --git a/src/aix/btop_collect.cpp b/src/aix/btop_collect.cpp
 new file mode 100644
-index 0000000..406d0f0
+index 0000000..18ab765
 --- /dev/null
 +++ b/src/aix/btop_collect.cpp
-@@ -0,0 +1,1487 @@
+@@ -0,0 +1,1526 @@
 +/* Copyright 2026 Martin Lonkwitz (btop-aix)
 +
 +   Licensed under the Apache License, Version 2.0 (the "License");
@@ -860,6 +885,8 @@ index 0000000..406d0f0
 +	bool has_swap = false;
 +	int disk_ios = 0;
 +	vector<string> last_found;
++	//? Mount points whose statvfs() failed once (e.g. WPAR file systems without access); logged once, then skipped like upstream Linux
++	std::unordered_set<string> statvfs_ignored;
 +
 +	mem_info current_mem{};
 +
@@ -1126,6 +1153,7 @@ index 0000000..406d0f0
 +			for (const auto& m : get_mounts()) {
 +				//? only_physical hides remote file systems (NFS automounts can run into the hundreds on SAP hosts)
 +				if (only_physical and m.remote) continue;
++				if (statvfs_ignored.contains(m.mountpoint)) continue;
 +
 +				//? Match filter if not empty
 +				if (not filter.empty()) {
@@ -1149,13 +1177,18 @@ index 0000000..406d0f0
 +			}
 +
 +			//? Get disk/partition stats
-+			for (const auto& mountpoint : found) {
-+				auto& disk = disks.at(mountpoint);
++			for (auto fit = found.begin(); fit != found.end();) {
++				const auto& mountpoint = *fit;
 +				struct statvfs vfs;
 +				if (statvfs(mountpoint.c_str(), &vfs) < 0) {
-+					Logger::warning("Failed to get disk/partition stats with statvfs() for: {}", mountpoint);
++					const int err = errno;
++					Logger::warning("Failed to get disk/partition stats for mount \"{}\" with statvfs error code: {}. Ignoring...", mountpoint, err);
++					statvfs_ignored.insert(mountpoint);
++					disks.erase(mountpoint);
++					fit = found.erase(fit);
 +					continue;
 +				}
++				auto& disk = disks.at(mountpoint);
 +				disk.total = (int64_t)vfs.f_blocks * (int64_t)vfs.f_frsize;
 +				disk.free = (int64_t)vfs.f_bfree * (int64_t)vfs.f_frsize;
 +				disk.used = disk.total - disk.free;
@@ -1166,6 +1199,7 @@ index 0000000..406d0f0
 +					disk.used_percent = 0;
 +					disk.free_percent = 0;
 +				}
++				++fit;
 +			}
 +
 +			disk_ios = 0;
@@ -1460,17 +1494,47 @@ index 0000000..406d0f0
 +		}
 +	}
 +
-+	//? Replace C0 controls, DEL and UTF-8 encoded C1 controls (U+0080..U+009F) by '?'; O(n)
++	//? Replace C0 controls, DEL, C1 controls (U+0080..U+009F) and every byte that is not part of valid UTF-8
++	//? (RFC 3629: no overlongs, no surrogates, nothing above U+10FFFF) by '?'; O(n). Valid multi-byte characters
++	//? stay, so their continuation bytes 0x80..0x9F still reach the terminal: btop assumes a UTF-8 terminal.
 +	void replace_control_chars(string& s) {
-+		for (size_t i = 0; i < s.size(); i++) {
++		string out;
++		out.reserve(s.size());
++		const size_t n = s.size();
++		for (size_t i = 0; i < n;) {
 +			const auto c = static_cast<unsigned char>(s[i]);
-+			if (c < 0x20 or c == 0x7f) {
-+				s[i] = '?';
-+			} else if (c == 0xc2 and i + 1 < s.size()) {
-+				const auto n = static_cast<unsigned char>(s[i + 1]);
-+				if (n >= 0x80 and n <= 0x9f) s.replace(i, 2, "?");
++			if (c < 0x80) {
++				out += (c < 0x20 or c == 0x7f) ? '?' : static_cast<char>(c);
++				i++;
++				continue;
++			}
++			//? Sequence length and the allowed range of the first continuation byte
++			size_t len = 0;
++			unsigned char lo = 0x80, hi = 0xbf;
++			if (c >= 0xc2 and c <= 0xdf) len = 2;
++			else if (c == 0xe0) { len = 3; lo = 0xa0; }
++			else if ((c >= 0xe1 and c <= 0xec) or c == 0xee or c == 0xef) len = 3;
++			else if (c == 0xed) { len = 3; hi = 0x9f; }
++			else if (c == 0xf0) { len = 4; lo = 0x90; }
++			else if (c >= 0xf1 and c <= 0xf3) len = 4;
++			else if (c == 0xf4) { len = 4; hi = 0x8f; }
++			bool valid = len > 0 and len <= n - i;
++			for (size_t k = 1; valid and k < len; k++) {
++				const auto b = static_cast<unsigned char>(s[i + k]);
++				valid = k == 1 ? (b >= lo and b <= hi) : (b >= 0x80 and b <= 0xbf);
++			}
++			if (not valid) {
++				out += '?';
++				i++;
++			} else {
++				if (len == 2 and c == 0xc2 and static_cast<unsigned char>(s[i + 1]) <= 0x9f)
++					out += '?';
++				else
++					out.append(s, i, len);
++				i += len;
 +			}
 +		}
++		s = std::move(out);
 +	}
 +
 +	//? Map procentry64::pi_state to the btop one-letter state
@@ -1853,7 +1917,7 @@ index 0000000..406d0f0
 +	}
 +}  // namespace Tools
 diff --git a/src/btop.cpp b/src/btop.cpp
-index 6b4400b..12e0061 100644
+index 01e20d9..f50e3df 100644
 --- a/src/btop.cpp
 +++ b/src/btop.cpp
 @@ -57,6 +57,10 @@ tab-size = 4
@@ -1867,7 +1931,15 @@ index 6b4400b..12e0061 100644
  #include <fmt/core.h>
  #include <fmt/ostream.h>
  
-@@ -213,7 +217,8 @@ void clean_quit(int sig) {
+@@ -65,6 +69,7 @@ tab-size = 4
+ #include "btop_draw.hpp"
+ #include "btop_input.hpp"
+ #include "btop_log.hpp"
++#include "btop_mcp.hpp"
+ #include "btop_menu.hpp"
+ #include "btop_shared.hpp"
+ #include "btop_theme.hpp"
+@@ -213,7 +218,8 @@ void clean_quit(int sig) {
  	Global::quitting = true;
  	Runner::stop();
  	if (Global::_runner_started) {
@@ -1877,7 +1949,7 @@ index 6b4400b..12e0061 100644
  		if (pthread_join(Runner::runner_id, nullptr) != 0) {
  			Logger::warning("Failed to join _runner thread on exit!");
  		}
-@@ -255,9 +260,14 @@ void clean_quit(int sig) {
+@@ -255,9 +261,14 @@ void clean_quit(int sig) {
  
  #if defined __APPLE__ || defined __OpenBSD__ || defined __NetBSD__
  	_Exit(excode);
@@ -1892,7 +1964,7 @@ index 6b4400b..12e0061 100644
  }
  
  //* Handler for SIGTSTP; stops threads, restores terminal and sends SIGSTOP
-@@ -909,6 +919,9 @@ static auto configure_tty_mode(std::optional<bool> force_tty) {
+@@ -909,9 +920,18 @@ static auto configure_tty_mode(std::optional<bool> force_tty) {
  		if (sysctl(mib, 4, buf, &bufsize, NULL, 0) == 0)
  			Global::self_path = fs::path(buf).remove_filename();
  	}
@@ -1901,12 +1973,75 @@ index 6b4400b..12e0061 100644
 +	Global::self_path = Aix::executable_dir();
  #endif
  	if (std::error_code ec; not Global::self_path.empty()) {
++	#ifdef _AIX
++		//? fs::canonical fails on AIX 6.1 and 7.2 TL5 (realpath(p, NULL) -> EINVAL), see src/aix/aix_selfpath.hpp
++		Theme::theme_dir = Aix::canonical(Global::self_path / "../share/btop/themes");
++		if (Theme::theme_dir.empty()) ec = std::make_error_code(std::errc::no_such_file_or_directory);
++	#else
  		Theme::theme_dir = fs::canonical(Global::self_path / "../share/btop/themes", ec);
++	#endif
+ 		if (ec or not fs::is_directory(Theme::theme_dir) or access(Theme::theme_dir.c_str(), R_OK) == -1) Theme::theme_dir.clear();
+ 	}
+ 	//? If relative path failed, check two most common absolute paths
+@@ -933,6 +953,15 @@ static auto configure_tty_mode(std::optional<bool> force_tty) {
+ 	//? Config init
+ 	init_config(cli.low_color, cli.filter);
+ 
++	//? Headless MCP server: no terminal, no locale check (JSON is UTF-8 by definition), see src/btop_mcp.cpp
++	if (cli.mcp_stdio) {
++		return Mcp::run_stdio({
++			.tools_file = cli.mcp_tools.value_or(Mcp::default_tools_file()),
++			.allow_signals = cli.mcp_allow_signals,
++			.interval_ms = cli.updates.value_or(static_cast<std::uint32_t>(Config::getI("update_ms"))),
++		});
++	}
++
+ 	//? Try to find and set a UTF-8 locale
+ 	if (std::setlocale(LC_ALL, "") != nullptr and not std::string_view { std::setlocale(LC_ALL, "") }.contains(";")
+ 	and str_to_upper(s_replace((string)std::setlocale(LC_ALL, ""), "-", "")).ends_with("UTF8")) {
+diff --git a/src/btop_input.cpp b/src/btop_input.cpp
+index 4c77b71..2bc36a2 100644
+--- a/src/btop_input.cpp
++++ b/src/btop_input.cpp
+@@ -106,7 +106,25 @@ namespace Input {
+ 			waitptr = &wait;
+ 		}
+ 
++	#ifdef _AIX
++		//? AIX 6.1/7.1 libc pselect() ignores tv_nsec ({0 s, 999 ms} returns at once, {1 s, 500 ms} waits 1000 ms;
++		//? tools/aix/probes/pselect_probe.c), so the main loop spun for up to one second per update cycle.
++		//? libc itself emulates pselect as sigprocmask + select + sigprocmask (truss); do the same with a correct timeval.
++		struct timeval tv;
++		struct timeval *tvptr = nullptr;
++		if (waitptr != nullptr) {
++			tv.tv_sec = wait.tv_sec;
++			tv.tv_usec = wait.tv_nsec / 1000;
++			tvptr = &tv;
++		}
++		sigset_t old_mask;
++		pthread_sigmask(SIG_SETMASK, &signal_mask, &old_mask);
++		const int ready = select(STDIN_FILENO + 1, &fds, nullptr, nullptr, tvptr);
++		pthread_sigmask(SIG_SETMASK, &old_mask, nullptr);
++		if (ready > 0) {
++	#else
+ 		if(pselect(STDIN_FILENO + 1, &fds, nullptr, nullptr, waitptr, &signal_mask) > 0) {
++	#endif
+ 			input.clear();
+ 			char buf[1024];
+ 			ssize_t count = 0;
 diff --git a/src/btop_menu.cpp b/src/btop_menu.cpp
-index bcb64bf..7d454cb 100644
+index bcb64bf..0b68d3b 100644
 --- a/src/btop_menu.cpp
 +++ b/src/btop_menu.cpp
-@@ -110,6 +110,16 @@ namespace Menu {
+@@ -19,6 +19,7 @@ tab-size = 4
+ #include "btop_menu.hpp"
+ 
+ #include "btop_config.hpp"
++#include "btop_core.hpp"
+ #include "btop_draw.hpp"
+ #include "btop_log.hpp"
+ #include "btop_shared.hpp"
+@@ -110,6 +111,16 @@ namespace Menu {
  		"SIGXFSZ", "SIGVTALRM", "SIGPROF", "SIGWINCH",
  		"SIGIO", "SIGPWR", "SIGSYS"
  #endif
@@ -1923,6 +2058,32 @@ index bcb64bf..7d454cb 100644
  #elif defined(__OpenBSD__) || defined(__FreeBSD__) || defined(__APPLE__)
  		"SIGHUP", "SIGINT", "SIGQUIT", "SIGILL",
  		"SIGTRAP", "SIGABRT", "SIGEMT", "SIGFPE",
+@@ -1031,12 +1042,8 @@ namespace Menu {
+ 		else if (is_in(key, "enter", "space") and selected_signal >= 0) {
+ 			ChooseEntering:
+ 			signalKillRet = 0;
+-			if (s_pid < 1) {
+-				signalKillRet = ESRCH;
+-				menuMask.set(SignalReturn);
+-			}
+-			else if (kill(s_pid.value(), selected_signal) != 0) {
+-				signalKillRet = errno;
++			if (auto sent = Core::send_signal(s_pid.value(), selected_signal); not sent) {
++				signalKillRet = sent.error();
+ 				menuMask.set(SignalReturn);
+ 			}
+ 			goto MenuClosing;
+@@ -1159,8 +1166,8 @@ namespace Menu {
+ 		auto ret = messageBox.input(key);
+ 		if (ret == msgBox::Ok_Yes) {
+ 			signalKillRet = 0;
+-			if (kill(s_pid.value(), signalToSend) != 0) {
+-				signalKillRet = errno;
++			if (auto sent = Core::send_signal(s_pid.value(), signalToSend); not sent) {
++				signalKillRet = sent.error();
+ 				menuMask.set(SignalReturn);
+ 			}
+ 			messageBox.clear();
 diff --git a/src/btop_shared.hpp b/src/btop_shared.hpp
 index 0abd18c..1cb0afd 100644
 --- a/src/btop_shared.hpp
@@ -1940,3 +2101,54 @@ index 0abd18c..1cb0afd 100644
  // clang-format on
  
  #if defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+diff --git a/src/btop_theme.cpp b/src/btop_theme.cpp
+index 5710d6c..a4ef2ea 100644
+--- a/src/btop_theme.cpp
++++ b/src/btop_theme.cpp
+@@ -37,7 +37,6 @@ using namespace Tools;
+ namespace fs = std::filesystem;
+ 
+ string Term::fg, Term::bg;
+-string Fx::reset = reset_base;
+ 
+ namespace Theme {
+ 
+diff --git a/src/btop_tools.cpp b/src/btop_tools.cpp
+index f0e0de6..359215a 100644
+--- a/src/btop_tools.cpp
++++ b/src/btop_tools.cpp
+@@ -92,18 +92,22 @@ namespace Term {
+ 		// Query dimensions of '/dev/tty' of the 'STDOUT_FILENO' isn't available.
+ 		// This variable is set in those cases to avoid calls to ioctl
+ 		constinit static bool uses_dev_tty = false;
++		//? Log each failure only once; refresh() runs in the input loop and flooded btop.log (thousands of lines per second)
++		constinit static bool dev_tty_failed = false;
+ 		struct winsize wsize {};
+ 		if (uses_dev_tty || ioctl(STDOUT_FILENO, TIOCGWINSZ, &wsize) < 0 || (wsize.ws_col == 0 && wsize.ws_row == 0)) {
+-			Logger::error(R"(Couldn't determine terminal size of "STDOUT_FILENO"!)");
++			if (not uses_dev_tty and not dev_tty_failed) Logger::error(R"(Couldn't determine terminal size of "STDOUT_FILENO"!)");
+ 			auto dev_tty = open("/dev/tty", O_RDONLY | O_CLOEXEC);
+ 			if (dev_tty != -1) {
+ 				ioctl(dev_tty, TIOCGWINSZ, &wsize);
+ 				close(dev_tty);
+ 			}
+ 			else {
+-				Logger::error(R"(Couldn't determine terminal size of "/dev/tty"!)");
++				if (not dev_tty_failed) Logger::error(R"(Couldn't determine terminal size of "/dev/tty"!)");
++				dev_tty_failed = true;
+ 				return false;
+ 			}
++			dev_tty_failed = false;
+ 			uses_dev_tty = true;
+ 		}
+ 		if (width != wsize.ws_col or height != wsize.ws_row) {
+@@ -748,6 +752,9 @@ const string Fx::us = e + "29m";	//* Strike/crossed-out on/off
+ //* Reset foreground/background color and text effects
+ const string Fx::reset_base = e + "0m";
+ 
++//* Defined here, after reset_base, to guarantee initialization order
++string Fx::reset = reset_base;
++
+ //* Regex for matching color, style and cursor move escape sequences
+ const std::regex Fx::escape_regex("\033\\[\\d+;?\\d?;?\\d*;?\\d*;?\\d*(m|f|s|u|C|D|A|B){1}");
+ 

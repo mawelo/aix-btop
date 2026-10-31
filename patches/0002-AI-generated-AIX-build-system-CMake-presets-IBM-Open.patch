@@ -1,7 +1,7 @@
-From 3a2c6000e9414d503f3cbd9fb1037db1c06040e2 Mon Sep 17 00:00:00 2001
+From 7d992f124333aeed4cf9bd4b011cc863f30e1cc4 Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Wed, 14 Oct 2026 13:54:39 +0200
-Subject: [PATCH 2/4] [AI generated] AIX: build system (CMake, presets, IBM
+Date: Sat, 31 Oct 2026 12:54:45 +0100
+Subject: [PATCH 2/5] [AI generated] AIX: build system (CMake, presets, IBM
  Open XL toolchain files, Makefile), README section
 
 * CMakeLists.txt: AIX branch (sources, -D_ALL_SOURCE -D_THREAD_SAFE,
@@ -16,22 +16,47 @@ Subject: [PATCH 2/4] [AI generated] AIX: build system (CMake, presets, IBM
   find has no -maxdepth.
 * README.md: section "Compilation AIX".
 ---
- CMakeLists.txt                           | 16 +++-
+ CMakeLists.txt                           | 31 +++++++-
  CMakePresets.json                        | 96 ++++++++++++++++++++++++
  Makefile                                 | 18 ++++-
  README.md                                | 45 +++++++++++
  cmake/Toolchain-aix-openxl.cmake         | 25 ++++++
  cmake/Toolchain-aix-sysroot-openxl.cmake | 38 ++++++++++
- 6 files changed, 233 insertions(+), 5 deletions(-)
+ 6 files changed, 248 insertions(+), 5 deletions(-)
  create mode 100644 CMakePresets.json
  create mode 100644 cmake/Toolchain-aix-openxl.cmake
  create mode 100644 cmake/Toolchain-aix-sysroot-openxl.cmake
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 2cbbccd..86eedeb 100644
+index 2cbbccd..9e28b85 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -79,6 +79,8 @@ elseif(LINUX)
+@@ -56,10 +56,24 @@ add_library(libbtop OBJECT
+   src/btop_shared.cpp
+   src/btop_theme.cpp
+   src/btop_tools.cpp
++  src/btop_core.cpp
++  src/btop_lua.cpp
++  src/btop_mcp.cpp
+ )
+ 
+ target_link_libraries(btop libbtop)
+ 
++# Lua 5.4.8 (libs/lua-5.4.8, unchanged upstream sources) for the scripting API (src/btop_lua.cpp).
++# Compiled as C++: lua_error then throws and unwinds C++ frames instead of longjmp over their destructors.
++file(GLOB BTOP_LUA_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/libs/lua-5.4.8/src/*.c)
++set_source_files_properties(${BTOP_LUA_SOURCES} PROPERTIES LANGUAGE CXX)
++add_library(btop_lua STATIC ${BTOP_LUA_SOURCES})
++target_include_directories(btop_lua SYSTEM PUBLIC libs/lua-5.4.8/src)
++target_compile_definitions(btop_lua PRIVATE LUA_USE_POSIX)
++target_link_libraries(libbtop btop_lua)
++# Reusable headers (symlinks into the shared library collection; the CI driver ships them dereferenced)
++target_include_directories(libbtop PUBLIC libs/reuse)
++
+ if(BTOP_LTO)
+   check_ipo_supported()
+   set_target_properties(btop PROPERTIES INTERPROCEDURAL_OPTIMIZATION ON)
+@@ -79,6 +93,8 @@ elseif(LINUX)
    if(BTOP_GPU)
      add_subdirectory(src/linux/intel_gpu_top)
    endif()
@@ -40,7 +65,7 @@ index 2cbbccd..86eedeb 100644
  else()
    message(FATAL_ERROR "${CMAKE_SYSTEM_NAME} is not supported")
  endif()
-@@ -89,6 +91,11 @@ execute_process(
+@@ -89,6 +105,11 @@ execute_process(
    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
    OUTPUT_VARIABLE GIT_COMMIT
    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
@@ -52,7 +77,7 @@ index 2cbbccd..86eedeb 100644
  set(CONFIGURE_COMMAND
      "cmake -DBTOP_STATIC=${BTOP_STATIC} -DBTOP_GPU=${BTOP_GPU}"
  )
-@@ -135,7 +142,8 @@ target_compile_options(libbtop PUBLIC -Wall -Wextra -Wpedantic)
+@@ -135,7 +156,8 @@ target_compile_options(libbtop PUBLIC -Wall -Wextra -Wpedantic)
  
  include(CheckCXXCompilerFlag)
  
@@ -62,7 +87,7 @@ index 2cbbccd..86eedeb 100644
    target_compile_options(libbtop PUBLIC -fstack-clash-protection)
  endif()
  check_cxx_compiler_flag(-fstack-protector HAS_FSTACK_PROTECTOR)
-@@ -247,6 +255,12 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "NetBSD")
+@@ -247,6 +269,12 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "NetBSD")
    find_package(kvm REQUIRED)
    find_package(proplib REQUIRED)
    target_link_libraries(libbtop kvm::kvm proplib::proplib)
@@ -75,9 +100,17 @@ index 2cbbccd..86eedeb 100644
  endif()
  
  # Check if lowdown is installed
+@@ -272,6 +300,7 @@ install(FILES "btop.desktop" DESTINATION "share/applications")
+ install(FILES "Img/icon.png" DESTINATION "share/icons/hicolor/48x48/apps" RENAME "btop.png")
+ install(FILES "Img/icon.svg" DESTINATION "share/icons/hicolor/scalable/apps" RENAME "btop.svg")
+ install(DIRECTORY "themes" DESTINATION "share/btop")
++install(DIRECTORY "mcp" DESTINATION "share/btop")
+ 
+ include(CTest)
+ if(BUILD_TESTING)
 diff --git a/CMakePresets.json b/CMakePresets.json
 new file mode 100644
-index 0000000..f673c93
+index 0000000..32e2392
 --- /dev/null
 +++ b/CMakePresets.json
 @@ -0,0 +1,96 @@
@@ -150,7 +183,7 @@ index 0000000..f673c93
 +        "BTOP_AIX_SYSROOT": "/build/btop-aix/sysroot61",
 +        "BTOP_AIX_RUNTIME": "/build/btop-aix/rt61",
 +        "BTOP_AIX_COMPAT": "/build/btop-aix/aix61_compat.h",
-+        "BTOP_AIX_EXTRA_FLAGS": "-fno-builtin-strlen -fno-builtin-strcmp"
++        "BTOP_AIX_EXTRA_FLAGS": "-fno-builtin-strlen -fno-builtin-strcmp -fno-builtin-strcpy"
 +      }
 +    }
 +  ],
@@ -318,7 +351,7 @@ index 0000000..0b55906
 +set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
 diff --git a/cmake/Toolchain-aix-sysroot-openxl.cmake b/cmake/Toolchain-aix-sysroot-openxl.cmake
 new file mode 100644
-index 0000000..09bbb7b
+index 0000000..0e502cd
 --- /dev/null
 +++ b/cmake/Toolchain-aix-sysroot-openxl.cmake
 @@ -0,0 +1,38 @@
@@ -335,7 +368,7 @@ index 0000000..09bbb7b
 +#   BTOP_AIX_SYSROOT      root of the target sysroot (usr/include, usr/lib, usr/ccs/lib, cxxwrap)
 +#   BTOP_AIX_RUNTIME      install prefix of the static libc++ built against that sysroot
 +#   BTOP_AIX_COMPAT       header prepended to every translation unit (strftime_l, noreturn, 6.1: xlocale)
-+#   BTOP_AIX_EXTRA_FLAGS  extra compiler flags (6.1: -fno-builtin-strlen -fno-builtin-strcmp)
++#   BTOP_AIX_EXTRA_FLAGS  extra compiler flags (6.1: -fno-builtin-strlen -fno-builtin-strcmp -fno-builtin-strcpy)
 +
 +set(BTOP_OPENXL_ROOT     "/opt/IBM/openxlC/17.1.3"        CACHE PATH "IBM Open XL C/C++ installation root")
 +set(BTOP_AIX_SYSROOT     "/build/btop-aix/sysroot71"      CACHE PATH "sysroot of the target AIX release")

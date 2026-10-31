@@ -1,7 +1,7 @@
-From 85e02048ddac00930e4d713e59bab662700e36cc Mon Sep 17 00:00:00 2001
+From 4769d1f610cfe5b22fdda79a9ae5abf52eb2f33d Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Wed, 14 Oct 2026 13:54:39 +0200
-Subject: [PATCH 4/4] [AI generated] AIX: RPM packaging (spec, launcher),
+Date: Sat, 31 Oct 2026 12:54:45 +0100
+Subject: [PATCH 4/5] [AI generated] AIX: RPM packaging (spec, launcher),
  probes and check tools
 
 * tools/aix/rpm: btop.spec (layout /opt/btop, symlink /usr/bin/btop, MD5 file
@@ -11,7 +11,9 @@ Subject: [PATCH 4/4] [AI generated] AIX: RPM packaging (spec, launcher),
   and an equivalent tar archive, writes rpm-info.txt), README.AIX.
 * tools/aix/probes: perfstat_sizes.cpp (structure sizes across releases),
   cxxrt_probe.cpp (C++23 runtime smoke test), pthread_probe.c (static mutex
-  initializer across releases), libcall_probe.c (___strlen64/___strcmp64).
+  initializer across releases), libcall_probe.c (___strlen64/___strcmp64),
+  pselect_probe.c (pselect timeout), realpath_probe.c (realpath(p, NULL)),
+  selfpath_probe.cpp (steps of the executable path lookup).
 * tools/aix/check_imports.pl: imports of an XCOFF binary against the export
   list of a target release.
 * tools/aix/ansi_render.pl: render a terminal recording as a text screen.
@@ -30,15 +32,18 @@ Subject: [PATCH 4/4] [AI generated] AIX: RPM packaging (spec, launcher),
  .../probes/perfstat_layout/stub/sys/rset.h    |   1 +
  tools/aix/probes/perfstat_size_probe.c        |  59 ++++
  tools/aix/probes/perfstat_sizes.cpp           |  67 ++++
+ tools/aix/probes/pselect_probe.c              |  60 ++++
  tools/aix/probes/pthread_probe.c              |  36 ++
+ tools/aix/probes/realpath_probe.c             |  35 ++
  tools/aix/probes/rusage_probe.c               |  64 ++++
+ tools/aix/probes/selfpath_probe.cpp           |  40 +++
  tools/aix/rpm/README.AIX                      |  72 ++++
  tools/aix/rpm/btop.sh                         |  32 ++
- tools/aix/rpm/btop.spec                       |  87 +++++
- tools/aix/rpm/build_rpm.pl                    | 103 ++++++
+ tools/aix/rpm/btop.spec                       |  89 +++++
+ tools/aix/rpm/build_rpm.pl                    | 106 ++++++
  tools/aix/shim/strftime_l_shim.c              |  33 ++
  tools/aix/shim/strftime_l_shim.exp            |   1 +
- 20 files changed, 1162 insertions(+)
+ 23 files changed, 1302 insertions(+)
  create mode 100755 tools/aix/ansi_render.pl
  create mode 100755 tools/aix/check_imports.pl
  create mode 100644 tools/aix/probes/cxxrt_probe.cpp
@@ -51,8 +56,11 @@ Subject: [PATCH 4/4] [AI generated] AIX: RPM packaging (spec, launcher),
  create mode 100644 tools/aix/probes/perfstat_layout/stub/sys/rset.h
  create mode 100644 tools/aix/probes/perfstat_size_probe.c
  create mode 100644 tools/aix/probes/perfstat_sizes.cpp
+ create mode 100644 tools/aix/probes/pselect_probe.c
  create mode 100644 tools/aix/probes/pthread_probe.c
+ create mode 100644 tools/aix/probes/realpath_probe.c
  create mode 100644 tools/aix/probes/rusage_probe.c
+ create mode 100644 tools/aix/probes/selfpath_probe.cpp
  create mode 100644 tools/aix/rpm/README.AIX
  create mode 100644 tools/aix/rpm/btop.sh
  create mode 100644 tools/aix/rpm/btop.spec
@@ -866,6 +874,72 @@ index 0000000..9d996de
 +		perfstat_pagingspace(nullptr, nullptr, sizeof(perfstat_pagingspace_t), 0));
 +	return 0;
 +}
+diff --git a/tools/aix/probes/pselect_probe.c b/tools/aix/probes/pselect_probe.c
+new file mode 100644
+index 0000000..b5930bd
+--- /dev/null
++++ b/tools/aix/probes/pselect_probe.c
+@@ -0,0 +1,60 @@
++/* pselect_probe.c -- project btop-aix (2026-10-19)
++ *
++ * Who/what: Measures how long pselect() on STDIN (a terminal without input) really waits for several timeouts and
++ *           compares it with select(). Output per case: timeout, return value, errno, measured ms.
++ * Why:      truss on AIX 7100-02 and 6100-09 showed that btop's Input::poll called pselect with less than 1000 ms left
++ *           (tv_sec=0, tv_nsec>0); _select then returned 0 at once, for one second of every 2-s cycle. Assumption:
++ *           pselect on AIX handles tv_sec=0 wrongly. This probe checks that in isolation. Result: pselect on AIX 6.1
++ *           and 7.1 ignores tv_nsec; on 7.2 it works.
++ * Build:    (AIX 7.2 build host with Open XL) /opt/IBM/openxlC/17.1.3/bin/ibm-clang_r -m64 -O1 -o pselect_probe pselect_probe.c
++ *           ./pselect_probe </dev/tty  (under ssh -tt, so that STDIN is a terminal without input)
++ */
++#include <errno.h>
++#include <signal.h>
++#include <stdio.h>
++#include <string.h>
++#include <sys/select.h>
++#include <time.h>
++
++static double now_ms(void) {
++	struct timespec t;
++	clock_gettime(CLOCK_MONOTONIC, &t);
++	return t.tv_sec * 1e3 + t.tv_nsec / 1e6;
++}
++
++static void probe_pselect(long sec, long nsec) {
++	fd_set fds;
++	FD_ZERO(&fds);
++	FD_SET(0, &fds);
++	struct timespec ts = {sec, nsec};
++	sigset_t mask;
++	sigemptyset(&mask);
++	double t0 = now_ms();
++	int rc = pselect(1, &fds, NULL, NULL, &ts, &mask);
++	int e = errno;
++	printf("pselect tv_sec=%ld tv_nsec=%-10ld rc=%d errno=%-3d (%s) gewartet %8.1f ms\n", sec, nsec, rc, rc < 0 ? e : 0,
++		   rc < 0 ? strerror(e) : "-", now_ms() - t0);
++}
++
++static void probe_select(long sec, long usec) {
++	fd_set fds;
++	FD_ZERO(&fds);
++	FD_SET(0, &fds);
++	struct timeval tv = {sec, usec};
++	double t0 = now_ms();
++	int rc = select(1, &fds, NULL, NULL, &tv);
++	printf("select  tv_sec=%ld tv_usec=%-10ld rc=%d gewartet %8.1f ms\n", sec, usec, rc, now_ms() - t0);
++}
++
++int main(void) {
++	/* Faelle wie in btops Input::poll(min(1000, rest)): 1000 ms, 999 ms, 500 ms, 10 ms, 1 ms */
++	probe_pselect(1, 0);
++	probe_pselect(0, 999000000L);
++	probe_pselect(0, 500000000L);
++	probe_pselect(0, 10000000L);
++	probe_pselect(0, 1000000L);
++	probe_pselect(1, 500000000L);
++	probe_select(0, 500000L);
++	probe_select(1, 0);
++	return 0;
++}
 diff --git a/tools/aix/probes/pthread_probe.c b/tools/aix/probes/pthread_probe.c
 new file mode 100644
 index 0000000..fe590c8
@@ -906,6 +980,47 @@ index 0000000..fe590c8
 +	rc = pthread_create(&t, NULL, thr, NULL); printf("create rc=%d (%s)\n", rc, strerror(rc));
 +	if (rc == 0) { rc = pthread_join(t, &ret); printf("join rc=%d ret=%ld\n", rc, (long)ret); }
 +	printf("OK\n");
++	return 0;
++}
+diff --git a/tools/aix/probes/realpath_probe.c b/tools/aix/probes/realpath_probe.c
+new file mode 100644
+index 0000000..a147bd4
+--- /dev/null
++++ b/tools/aix/probes/realpath_probe.c
+@@ -0,0 +1,35 @@
++/* realpath_probe.c -- project btop-aix (2026-10-19)
++ *
++ * Who/what: Calls realpath(path, NULL) (POSIX.1-2008: result allocated with malloc) and realpath(path, buf) for "."
++ *           and "/tmp/../tmp" and prints the result and errno.
++ * Why:      libc++ 19 std::filesystem::canonical uses realpath(p, nullptr) (operations.cpp, __canonical). btop
++ *           --mcp-stdio did not find its tool registry on AIX 7200-05, 6100-09 and 6100-07 (Theme::theme_dir empty),
++ *           but did on 7100-02 and 7300-04. Does this depend on the AIX level? Result: realpath(p, NULL) returns
++ *           EINVAL on 6.1 TL7/TL9 and 7.2 TL5.
++ * Build:    (AIX 7.2 build host with Open XL and the 6.1 sysroot) /opt/IBM/openxlC/17.1.3/bin/ibm-clang_r -m64 -O1
++ *           -Wall -Wextra --sysroot=<sysroot61> -L<sysroot61>/usr/lib -o realpath_probe_aix61 realpath_probe.c
++ */
++#include <errno.h>
++#include <limits.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++static void probe(const char* path) {
++	errno = 0;
++	char* r = realpath(path, NULL);
++	int e = errno;
++	printf("realpath(\"%s\", NULL) = %s errno=%d (%s)\n", path, r ? r : "NULL", r ? 0 : e, r ? "-" : strerror(e));
++	free(r);
++	char buf[PATH_MAX + 1];
++	errno = 0;
++	char* b = realpath(path, buf);
++	e = errno;
++	printf("realpath(\"%s\", buf)  = %s errno=%d\n", path, b ? b : "NULL", b ? 0 : e);
++}
++
++int main(void) {
++	probe(".");
++	probe("/tmp/../tmp");
 +	return 0;
 +}
 diff --git a/tools/aix/probes/rusage_probe.c b/tools/aix/probes/rusage_probe.c
@@ -976,6 +1091,52 @@ index 0000000..c155b52
 +	}
 +	kill(child, SIGKILL);
 +	waitpid(child, NULL, 0);
++	return 0;
++}
+diff --git a/tools/aix/probes/selfpath_probe.cpp b/tools/aix/probes/selfpath_probe.cpp
+new file mode 100644
+index 0000000..310b361
+--- /dev/null
++++ b/tools/aix/probes/selfpath_probe.cpp
+@@ -0,0 +1,40 @@
++// selfpath_probe.cpp -- project btop-aix (2026-10-19)
++//
++// Who/what: Prints the steps of Aix::executable_dir() (src/aix/aix_selfpath.cpp): getprocs64 result, PID found,
++//           getargs return value, argv[0], canonical(argv[0]) and canonical(dir/../share/btop/themes).
++// Why:      btop --mcp-stdio did not find its tool registry on AIX 7200-05, 6100-09 and 6100-07 (Theme::theme_dir
++//           empty), but did on 7100-02 and 7300-04. Which step fails? (Answer: canonical, see realpath_probe.c.)
++// Build:    (AIX 7.2 build host with Open XL) /opt/IBM/openxlC/17.1.3/bin/ibm-clang++_r -std=c++23 -D_ALL_SOURCE -O1
++//           -o sp selfpath_probe.cpp
++//           ./sp ; (cd /; /tmp/x/sp)   -- call it with a relative and with an absolute path
++#include <array>
++#include <cerrno>
++#include <cstdio>
++#include <cstring>
++#include <filesystem>
++#include <string>
++#include <system_error>
++
++#include <procinfo.h>
++#include <sys/types.h>
++#include <unistd.h>
++
++int main(int, char** argv) {
++	std::printf("argv[0] (main): %s, getpid %d\n", argv[0], static_cast<int>(getpid()));
++	struct procentry64 pe{};
++	pid_t idx = getpid();
++	errno = 0;
++	const int n = getprocs64(&pe, sizeof pe, nullptr, 0, &idx, 1);
++	std::printf("getprocs64 rc=%d errno=%d pi_pid=%d next idx=%d\n", n, errno, static_cast<int>(pe.pi_pid), static_cast<int>(idx));
++	std::array<char, 4096> args{};
++	errno = 0;
++	const int g = getargs(&pe, sizeof pe, args.data(), static_cast<int>(args.size()));
++	args.back() = '\0';
++	std::printf("getargs rc=%d errno=%d argv0='%s'\n", g, errno, args.data());
++	std::error_code ec;
++	const auto c = std::filesystem::canonical(args.data(), ec);
++	std::printf("canonical(argv0) = '%s' ec=%d (%s)\n", c.c_str(), ec.value(), ec.message().c_str());
++	const auto t = std::filesystem::canonical(c.parent_path() / "../share/btop/themes", ec);
++	std::printf("canonical(themes) = '%s' ec=%d (%s)\n", t.c_str(), ec.value(), ec.message().c_str());
 +	return 0;
 +}
 diff --git a/tools/aix/rpm/README.AIX b/tools/aix/rpm/README.AIX
@@ -1096,10 +1257,10 @@ index 0000000..a4dd224
 +exec "$(dirname "$self")/btop.bin" "$@"
 diff --git a/tools/aix/rpm/btop.spec b/tools/aix/rpm/btop.spec
 new file mode 100644
-index 0000000..eb9668e
+index 0000000..34a95a2
 --- /dev/null
 +++ b/tools/aix/rpm/btop.spec
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,89 @@
 +# btop.spec -- AIX package for btop (project btop-aix, 2026-10-12)
 +#
 +# What : Binary RPM for AIX built from an already compiled btop binary and the source tree.
@@ -1179,6 +1340,8 @@ index 0000000..eb9668e
 +%dir /opt/btop/share
 +%dir /opt/btop/share/btop
 +/opt/btop/share/btop/themes
++# MCP tool registry for btop --mcp-stdio (Lua, release 5)
++/opt/btop/share/btop/mcp
 +%dir /opt/btop/share/doc
 +%docdir /opt/btop/share/doc/btop
 +/opt/btop/share/doc/btop
@@ -1189,10 +1352,10 @@ index 0000000..eb9668e
 +- AIX port of btop: perfstat, mntctl, getprocs64; static libc++ built against AIX 6.1, one package for 6.1 TL7 to 7.3
 diff --git a/tools/aix/rpm/build_rpm.pl b/tools/aix/rpm/build_rpm.pl
 new file mode 100644
-index 0000000..633d856
+index 0000000..430718e
 --- /dev/null
 +++ b/tools/aix/rpm/build_rpm.pl
-@@ -0,0 +1,103 @@
+@@ -0,0 +1,106 @@
 +#!/usr/bin/perl
 +# build_rpm.pl -- project btop-aix (2026-10-12)
 +#
@@ -1225,6 +1388,7 @@ index 0000000..633d856
 +for (qw(binary source commit out)) { die "--$_ missing\n" unless defined $o{$_} && length $o{$_} }
 +die "$o{binary}: not an executable binary\n" unless -f $o{binary} && -x _;
 +die "$o{source}: not a btop source tree (themes/ missing)\n" unless -d "$o{source}/themes";
++die "$o{source}: mcp/tools.lua missing\n" unless -f "$o{source}/mcp/tools.lua";
 +
 +my $src    = abs_path($o{source});
 +my $binary = abs_path($o{binary});
@@ -1255,6 +1419,8 @@ index 0000000..633d856
 +copy($launch, "$tree/opt/btop/bin/btop")     or die "copy launcher: $!";
 +chmod 0755, "$tree/opt/btop/bin/btop.bin", "$tree/opt/btop/bin/btop";
 +run('cp', '-Rp', "$src/themes", "$tree/opt/btop/share/btop/themes");
++# MCP tool registry (btop --mcp-stdio, src/btop_mcp.cpp); the spec lists /opt/btop/share/btop/mcp
++run('cp', '-Rp', "$src/mcp", "$tree/opt/btop/share/btop/mcp");
 +for my $d ("$src/README.md", "$src/LICENSE", $readme) { copy($d, "$tree/opt/btop/share/doc/btop/" . basename($d)) or die "copy $d: $!" }
 +symlink('/opt/btop/bin/btop', "$tree/usr/bin/btop") or die "symlink: $!";
 +# modes independent of the build host umask (release 2 shipped themes 0664 and directories 0775 because cp -Rp

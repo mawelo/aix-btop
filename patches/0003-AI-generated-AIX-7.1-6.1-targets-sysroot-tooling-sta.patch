@@ -1,7 +1,7 @@
-From 2d0067848b1cca51d5ed430453811c214b47d296 Mon Sep 17 00:00:00 2001
+From 7fd91a0cc5f55081b1e526a093f11eb66838f953 Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Wed, 14 Oct 2026 13:54:39 +0200
-Subject: [PATCH 3/4] [AI generated] AIX 7.1/6.1 targets: sysroot tooling,
+Date: Sat, 31 Oct 2026 12:54:45 +0100
+Subject: [PATCH 3/5] [AI generated] AIX 7.1/6.1 targets: sysroot tooling,
  static libc++ 19 build, LLVM patches, compat headers
 
 Binaries built with IBM Open XL on AIX 7.2 do not run on 7.1 or 6.1: the IBM
@@ -16,7 +16,8 @@ release and a static libc++/libc++abi/libunwind (LLVM 19.1.7) against it:
   older one needs libC symbols), guard the C++ overloads in math.h with
   __LIBC_NO_CPP_MATH_OVERLOADS__ as 7.2 does.
 * make_cxxwrap.pl: extern "C" wrappers for the C headers of 7.1/6.1, which
-  have no such brackets (isdigit, catopen, socket would get C++ linkage).
+  have no such brackets (isdigit, catopen, socket would get C++ linkage); under
+  C++ it removes the static_assert macro of the 6.1 assert.h.
 * build_rt.pl: libunwind, libc++abi, libc++ with the LLVM AIX cache, static,
   with LIBCXXABI_HAS_CXA_THREAD_ATEXIT_IMPL=OFF.
 * llvm-19.1.7-aix-cmake-quote.patch: unquoted ${CMAKE_SYSTEM_NAME} in the
@@ -29,8 +30,9 @@ release and a static libc++/libc++abi/libunwind (LLVM 19.1.7) against it:
   noreturn for abort/exit/_Exit (the 7.1 stdlib.h lacks it).
 * aix61_compat.h: AIX 6.1 has no POSIX 2008 locale API (locale_t, newlocale,
   uselocale, freelocale, *_l): a single-global-locale shim; O_CLOEXEC. With
-  -fno-builtin-strlen -fno-builtin-strcmp (Open XL otherwise references
-  ___strlen64/___strcmp64, not exported by the 6.1 libc) and
+  -fno-builtin-strlen -fno-builtin-strcmp -fno-builtin-strcpy (Open XL
+  otherwise references ___strlen64/___strcmp64/___strcpy64, not exported by
+  the 6.1 libc) and
   -DREMOVE_ALL_USE_DIRECTORY_ITERATOR for libc++ (no openat family on 6.1).
 
 The resulting btop binaries import only libc, libpthreads and libperfstat.
@@ -40,9 +42,9 @@ The resulting btop binaries import only libc, libpthreads and libperfstat.
  tools/aix/sysroot71/build_rt.pl               |  76 ++++++++++
  .../llvm-19.1.7-aix-cmake-quote.patch         |  33 +++++
  .../llvm-19.1.7-aix-cxa-thread-atexit.patch   |  32 +++++
- tools/aix/sysroot71/make_cxxwrap.pl           |  49 +++++++
+ tools/aix/sysroot71/make_cxxwrap.pl           |  52 +++++++
  tools/aix/sysroot71/make_sysroot.pl           |  94 ++++++++++++
- 7 files changed, 469 insertions(+)
+ 7 files changed, 472 insertions(+)
  create mode 100644 tools/aix/sysroot71/aix61_compat.h
  create mode 100644 tools/aix/sysroot71/aix71_compat.h
  create mode 100755 tools/aix/sysroot71/build_rt.pl
@@ -409,10 +411,10 @@ index 0000000..326e7c4
 +       static DtorsManager manager;
 diff --git a/tools/aix/sysroot71/make_cxxwrap.pl b/tools/aix/sysroot71/make_cxxwrap.pl
 new file mode 100755
-index 0000000..cec3297
+index 0000000..05ee41a
 --- /dev/null
 +++ b/tools/aix/sysroot71/make_cxxwrap.pl
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,52 @@
 +#!/usr/bin/perl
 +# make_cxxwrap.pl -- project btop-aix (2026-10-12)
 +#
@@ -458,6 +460,9 @@ index 0000000..cec3297
 +             "#ifdef __cplusplus\nextern \"C\" {\n#endif\n",
 +             "#include_next <$rel>\n",
 +             "#ifdef __cplusplus\n}\n#endif\n";
++    # AIX 6.1 assert.h defines static_assert as _Static_assert whenever _ALL_SOURCE is set, also for C++,
++    # where static_assert is a keyword: every use then warns "-Wc11-extensions" (2026-10-19, json.hpp).
++    print $o "#if defined(__cplusplus) && defined(static_assert)\n#undef static_assert\n#endif\n" if $rel eq 'assert.h';
 +    close $o;
 +    $wrapped++;
 +}}, $inc);

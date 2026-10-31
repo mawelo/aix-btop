@@ -8,25 +8,26 @@ terminal) to IBM AIX, and a ready-to-install package for AIX 6.1 TL7 up to 7.3.
 | Where | Content |
 |---|---|
 | [Releases](https://github.com/mawelo/aix-btop/releases) | `btop-<version>-<release>.aix6.1.ppc.rpm` (signed) and the same tree as `.tar.gz`, with `SHA256SUMS` + `SHA256SUMS.asc` (one package for AIX 6.1 TL7 to 7.3; "aix6.1" is the minimum release, rpm on 7.1 to 7.3 accepts it through its OS compatibility table) |
-| [`aix-public`](https://github.com/mawelo/btop/tree/aix-public) branch of the fork `mawelo/btop` | the same four patches as commits on top of the upstream base; `btop --version` of the package names a commit of this branch; the branch is rebuilt per release, so each release commit also carries a tag there (`v1.4.7-aix2` to `v1.4.7-aix4`) |
-| `patches/` | Patch series for the upstream repository (`git am`), base commit in `patches/BASE-COMMIT.txt` |
+| [`aix-public`](https://github.com/mawelo/btop/tree/aix-public) branch of the fork `mawelo/btop` | the same five patches as commits on top of the upstream base; `btop --version` of the package names a commit of this branch; the branch is rebuilt per release, so each release commit also carries a tag there (`v1.4.7-aix2` to `v1.4.7-aix4`, `v1.4.8-aix1`) |
+| `patches/` | Patch series on top of the upstream repository (`git am`), base commit in `patches/BASE-COMMIT.txt` |
 | `rpm/` | metadata of the current release (`rpm-info.txt`, `BUILD.txt`, `SHA256SUMS` + `SHA256SUMS.asc`); the packages themselves are attached to the [release](https://github.com/mawelo/aix-btop/releases/latest), `rpm/README.md` has direct links |
 | `img/` | screenshot (AIX 7100-05) |
 | `KEYS` | public key that signs the RPM and `SHA256SUMS` |
 
 ## Patches
 
-**[AI generated]** — the code in this series was written with the help of an LLM and is marked as upstream
-requires (`CONTRIBUTING.md`, section "AI generated code"): every commit subject carries `[AI generated]`.
-The `aix-public` branch of the fork and any pull request built from it keep this marking.
+**[AI generated]** — the code in this series was written with the help of an LLM. Every commit subject
+carries `[AI generated]`, the marking that upstream's `CONTRIBUTING.md` asks for (section "AI generated code"),
+and the `aix-public` branch of the fork keeps it. The port is maintained here as a separate line on top of
+upstream releases.
 
 The series applies on top of upstream commit
-**d3389d74e88644c50907e84314c3c7c973ba5be9** (`v1.4.7-107-gd3389d7`, branch `main`):
+**cf1da5900b1e9eaa1c20fd7148dd812b43340b8a** (tag `v1.4.8`):
 
 ```sh
 git clone https://github.com/aristocratos/btop
 cd btop
-git checkout d3389d74e88644c50907e84314c3c7c973ba5be9
+git checkout cf1da5900b1e9eaa1c20fd7148dd812b43340b8a
 git am /path/to/aix-btop/patches/*.patch
 ```
 
@@ -35,15 +36,18 @@ The result is identical to the `aix-public` branch of the fork, which can be use
 
 | Patch | Content |
 |---|---|
-| 0001 | Platform layer `src/aix/`: libperfstat (CPU, memory, disks, network), `mntctl`/`statvfs` (file systems), `getprocs64`/`getargs` (processes), `getifaddrs` replacement, executable path lookup; small shared-code changes (`pthread_join`, `_Exit`, AIX signal table) |
+| 0001 | Platform layer `src/aix/`: libperfstat (CPU, memory, disks, network), `mntctl`/`statvfs` (file systems), `getprocs64`/`getargs` (processes), `getifaddrs` replacement, executable path lookup; small shared-code changes (`pthread_join`, `_Exit`, AIX signal table, `select` instead of `pselect` on AIX); two shared fixes (terminal-size error logged once, initialization order of `Fx::reset`) |
 | 0002 | Build system: CMake branch, presets `aix-openxl`, `aix71-openxl`, `aix61-openxl`, IBM Open XL toolchain files, Makefile platform `aix`, README section |
 | 0003 | Tooling to build for AIX 7.1 and 6.1 on a 7.2 host: sysroot preparation, `extern "C"` header wrappers, static libc++/libc++abi/libunwind 19.1.7 with two LLVM patches, compatibility headers |
 | 0004 | RPM spec and launcher, probes and check tools |
+| 0005 | Scripting API: core API, Lua 5.4.8 in a sandbox, `btop --mcp-stdio` (MCP server over stdio, tools in `mcp/tools.lua`), GTest suites |
 
-The patches are meant to change no behaviour on other platforms: the code changes outside `src/aix/`, `cmake/`
-and `tools/aix/` are behind `_AIX` or `CMAKE_SYSTEM_NAME STREQUAL "AIX"`. Two build-system changes are
-unconditional but neutral: the Makefile collects sources with `$(wildcard ...)` instead of `find -maxdepth`, and
-CMake gains the cache variable `BTOP_GIT_COMMIT` (used only when set).
+Patches 0001 to 0004 are meant to change no behaviour on other platforms: their code changes outside `src/aix/`,
+`cmake/` and `tools/aix/` are behind `_AIX` or `CMAKE_SYSTEM_NAME STREQUAL "AIX"`, except the two shared fixes
+named for 0001. Two build-system changes are unconditional but neutral: the Makefile collects sources with
+`$(wildcard ...)` instead of `find -maxdepth`, and CMake gains the cache variable `BTOP_GIT_COMMIT` (used only
+when set). Patch 0005 applies to every platform: CMake always builds Lua and the scripting layer, and the menu
+sends signals through `Core::send_signal`. Without `--mcp-stdio` btop behaves as before.
 
 ## Building
 
@@ -65,16 +69,17 @@ CMake gains the cache variable `BTOP_GIT_COMMIT` (used only when set).
 One package, built against the AIX 6.1 headers and libraries, for every release from AIX 6.1 TL7 to 7.3.
 The 7.1 build stays in the tree as a build check but is not shipped.
 
-**Releases 1 and 2 are withdrawn:** they shipped group-writable themes (the release 1 tar also with owner
-uid/gid 1000 of the build host). Releases 1 to 3 also show control characters in process names
-(advisory GHSA-p45r-rq5h-mrcj). If one of releases 1 to 3 is installed, upgrade to the latest release. See `SECURITY.md`.
+**`v1.4.7-aix1` and `v1.4.7-aix2` are withdrawn:** they shipped group-writable themes (the `v1.4.7-aix1` tar also
+with owner uid/gid 1000 of the build host). `v1.4.7-aix1` to `v1.4.7-aix3` also show control characters in process
+names (advisory GHSA-p45r-rq5h-mrcj). If one of them is installed, upgrade to the latest release. See `SECURITY.md`.
+The release number counts per upstream version: `v1.4.8-aix1` follows `v1.4.7-aix4`.
 
 | File | Built against | Tested on | Expected to run on |
 |---|---|---|---|
 | `btop-<version>-<release>.aix6.1.ppc.rpm` (and the same tree as `.tar.gz`), attached to each [release](https://github.com/mawelo/aix-btop/releases) | AIX 6100-09 sysroot, static libc++ 19 | see the matrix below | AIX 6.1 TL7 and later, 7.1, 7.2, 7.3 (every technology level), because of the reasons given below |
 
-Test matrix of release 4 (`85e0204`), one run each on 2026-10-14; "load" = two single-threaded busy loops started
-next to btop, "launcher" = `opt/btop/bin/btop` started through a symlink in another directory, without `LANG`:
+Test matrix of `v1.4.8-aix1` (`bd98045`), one run each on 2026-10-31; "load" = two single-threaded busy loops
+started next to btop, "launcher" = `opt/btop/bin/btop` started through a symlink in another directory, without `LANG`:
 
 | AIX level | rpm.rte | Installed via | Started | Under load | Removed again |
 |---|---|---|---|---|---|
@@ -82,19 +87,27 @@ next to btop, "launcher" = `opt/btop/bin/btop` started through a symlink in anot
 | 6100-09-04 | n/a (non-root user) | tar, in a private directory | yes, launcher | yes | yes |
 | 7100-02-01 | 3.0.5 | tar, in a private directory | yes, launcher | yes | yes |
 | 7100-05-03 | 4.13.0 | `rpm -ivh`, `rpm -V` | yes, through `/usr/bin/btop` | no | `rpm -e`, no files left |
-| 7200-05-05 | 4.15.1 | tar, in a private directory (with release 3 also `rpm -ivh` and `rpm -V`, see below) | yes, launcher | yes | yes; `rpm -e`, no files left |
-| 7300-02-01 | 4.18.1 | `rpm -Uvh` over release 3, `rpm -V` | `--version` only | no | no (kept installed) |
+| 7200-05-05 | 4.15.1 | tar, in a private directory | yes, launcher | yes | yes |
 | 7300-04-00 | 4.20.1 | `rpm -ivh`, `rpm -V` | yes, through `/usr/bin/btop` | yes | `rpm -e`, no files left |
 
 On every tar host, `sh btop` and `ksh btop` inside `opt/btop/bin` started the binary next to them although another
-`btop` came first in `PATH`, and a busy process whose name contained ESC and BEL showed up as `x?]0;PWNED?y`.
+`btop` came first in `PATH`, and a busy process whose name contained ESC and BEL showed up as `x?]0;PWNED?y`;
+invalid UTF-8 in a process name showed up as `?`.
 
-With release 3, on the 7200-05 test host `rpm -ivh` returned 1 and both `rpm -ivh` and `rpm -e` printed `rpm_share: 0645-007 ATTENTION:
+`btop --mcp-stdio` from the tar archive, without `LANG` and with the default tool registry, on 6100-07, 6100-09,
+7100-02, 7200-05 and 7300-04 (one run each): 7 answers to initialize, tools/list, three tool calls
+(cpu, processes, disks), an unknown tool and ping; no tool call returned an error, the unknown tool was rejected
+with JSON-RPC error -32602.
+
+7300-02-01 runs `v1.4.7-aix4` (installed with `rpm -Uvh` over `v1.4.7-aix3`, `--version` only); that host is updated
+to `v1.4.8-aix1` after the publication.
+
+With `v1.4.7-aix3`, on the 7200-05 test host `rpm -ivh` returned 1 and both `rpm -ivh` and `rpm -e` printed `rpm_share: 0645-007 ATTENTION:
 whichfs() returned an unexpected result`, although the files were installed and removed correctly. The cause is a
 host-specific mount layout that `rpm_share` cannot map to a file system.
 This is a property of the host, not of the package.
 
-Not tested: 6.1 TL8, 7.1 TL0/TL1/TL3/TL4, 7.2 TL0 to TL4, 7.3 TL0/TL1/TL3 (TL2: install and `--version` only). Note that AIX 6.1 and 7.1 are out of
+Not tested: 6.1 TL8, 7.1 TL0/TL1/TL3/TL4, 7.2 TL0 to TL4, 7.3 TL0/TL1/TL3 (TL2: `v1.4.7-aix4`, install and `--version` only). Note that AIX 6.1 and 7.1 are out of
 IBM support; the port does not change that.
 
 Why one binary is expected to cover all of them:
@@ -133,21 +146,22 @@ when `TERM` is empty. The RPM refuses to install over a `/usr/bin/btop` that is 
 
 ```sh
 # RPM
-rpm -ivh btop-1.4.7-4.aix6.1.ppc.rpm
+rpm -ivh btop-1.4.8-1.aix6.1.ppc.rpm
 btop                                   # /usr/bin/btop -> /opt/btop/bin/btop -> /opt/btop/bin/btop.bin
 rpm -e btop
 
 # tar (rpm.rte 3.0.5): the archive contains only opt/btop
-cd / && gzip -dc btop-1.4.7-4.aix6.1.ppc.tar.gz | tar -xf -
+cd / && gzip -dc btop-1.4.8-1.aix6.1.ppc.tar.gz | tar -xf -
 ln -s /opt/btop/bin/btop /usr/bin/btop   # optional
 rm -rf /opt/btop /usr/bin/btop           # uninstall
 
 # tar without root, into any directory
-mkdir ~/btop && cd ~/btop && gzip -dc /path/to/btop-1.4.7-4.aix6.1.ppc.tar.gz | tar -xf -
+mkdir ~/btop && cd ~/btop && gzip -dc /path/to/btop-1.4.8-1.aix6.1.ppc.tar.gz | tar -xf -
 ~/btop/opt/btop/bin/btop                 # the launcher starts the btop.bin next to it (symlinks are followed)
 ```
 
-Layout: `/opt/btop/bin` (launcher and binary), `/opt/btop/share/btop/themes`, `/opt/btop/share/doc/btop`
+Layout: `/opt/btop/bin` (launcher and binary), `/opt/btop/share/btop/themes`, `/opt/btop/share/btop/mcp`
+(tool registry of `--mcp-stdio`), `/opt/btop/share/doc/btop`
 (`README.md`, `README.AIX`, `LICENSE`), symlink `/usr/bin/btop` (RPM only); per-user configuration in
 `~/.config/btop`, log in `~/.local/state/btop.log`. `btop --version` prints the commit the binary was built
 from; in this repository `rpm/rpm-info.txt` lists header, requirements and file list of the package and
@@ -159,6 +173,12 @@ CPU, load and frequency from libperfstat (DLPAR changes are followed), memory an
 file systems plus the physical volumes (`hdiskN`) with their I/O, network interfaces, processes
 (kernel `wait` processes hidden). Per file system I/O needs LVM statistics (`lvmstat -e`). Inside a
 WPAR the header shows "WPAR". Not available on AIX: sensors, battery, GPU.
+
+`btop --mcp-stdio` runs without a terminal and answers MCP clients with read-only measurements, for example
+`ssh user@host /opt/btop/bin/btop --mcp-stdio` as the server command of the client. The tools are listed in
+[`docs/mcp.md`](https://github.com/mawelo/btop/blob/aix-public/docs/mcp.md) of the fork. The transport is stdio
+only, so whoever may start btop on the host (for example over ssh) sees what that user sees; no network port is
+opened. `send_signal` is offered only with `--mcp-allow-signals`.
 
 Known limits of the 6.1 build: the C library has no POSIX 2008 locale API, so libc++ is built with a
 single-global-locale shim (`std::locale("xx_XX")` does not create a separate locale), and `O_CLOEXEC`
@@ -174,7 +194,7 @@ with the one shown on the GitHub profile or in the release notes, not only with 
 ```sh
 # on AIX with rpm.rte 4.15 or newer (tested: 4.15.1 on 7200-05, 4.20.1 on 7300-04)
 rpm --import KEYS
-rpm -K btop-1.4.7-4.aix6.1.ppc.rpm          # "digests signatures OK"
+rpm -K btop-1.4.8-1.aix6.1.ppc.rpm          # "digests signatures OK"
 
 # anywhere with GnuPG
 gpg --import KEYS

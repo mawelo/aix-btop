@@ -13,14 +13,15 @@ Only the latest release receives fixes.
 
 | Release | Status |
 |---|---|
-| `v1.4.7-aix4` and later | supported |
+| `v1.4.8-aix1` and later | supported |
+| `v1.4.7-aix4` | superseded: invalid UTF-8 in process names passed unchanged (matters only on a terminal in 8-bit mode); on AIX 6.1 and 7.1 the main loop spun for up to one second per update cycle (both fixed in `v1.4.8-aix1`) |
 | `v1.4.7-aix3` | superseded: control characters in process names reached the terminal of the user running btop (fixed in `v1.4.7-aix4`) |
-| `v1.4.7-aix1`, `v1.4.7-aix2` | withdrawn: the themes were group-writable (release 1 tar: also owned by uid/gid 1000); control characters as in release 3 |
+| `v1.4.7-aix1`, `v1.4.7-aix2` | withdrawn: the themes were group-writable (`v1.4.7-aix1` tar: also owned by uid/gid 1000); control characters as in `v1.4.7-aix3` |
 
-If release 1, 2 or 3 is installed, upgrade with `rpm -Uvh` (or unpack the release 4 tar archive); see advisory
+If `v1.4.7-aix1`, `-aix2` or `-aix3` is installed, upgrade with `rpm -Uvh` (or unpack the tar archive of the latest release); see advisory
 [GHSA-p45r-rq5h-mrcj](https://github.com/mawelo/aix-btop/security/advisories/GHSA-p45r-rq5h-mrcj).
 
-For release 1 or 2, the following closes only the file-mode problem, not the control-character problem:
+For `v1.4.7-aix1` or `-aix2`, the following closes only the file-mode problem, not the control-character problem:
 
 ```sh
 chown -R root:system /opt/btop
@@ -31,8 +32,18 @@ chmod -R go-w /opt/btop
 
 btop writes UTF-8, and the launcher `/opt/btop/bin/btop` adds `--force-utf` when no UTF-8 locale is active. Since
 `v1.4.7-aix4`, process names and arguments have C0 control characters, DEL and UTF-8 encoded C1 controls replaced
-by `?`. Other bytes from 0x80 to 0x9F pass unchanged (continuation bytes of other UTF-8 characters, or invalid
-UTF-8); a terminal in 8-bit mode (for example Latin-1) can read 0x9B as CSI and 0x9D as OSC. Use a UTF-8 terminal, which btop needs anyway.
+by `?`. Since `v1.4.8-aix1`, invalid UTF-8 is replaced by `?` as well, so a lone byte 0x9B or 0x9D no longer reaches
+a terminal in 8-bit mode (for example Latin-1), where it would read as CSI or OSC. Up to `v1.4.7-aix4` such bytes
+passed unchanged. Use a UTF-8 terminal, which btop needs anyway.
+
+## Upstream status
+
+Upstream btop has the same problem in its process list: [aristocratos/btop#1846](https://github.com/aristocratos/btop/issues/1846)
+(escape sequences through the process name). The issue was closed as "not planned" on 2026-10-18 without a
+comment; upstream `main` has no fix as of 2026-10-19 (last checked commit `4792b07`). This port closes the paths
+listed there: the process name (`v1.4.7-aix4`), the shortened command in the narrow tree view, DEL and UTF-8 encoded
+C1 controls (`v1.4.7-aix4`), and invalid UTF-8 (`v1.4.8-aix1`). An upstream build on AIX or any other platform does
+not include these fixes.
 
 ## Verifying packages
 
