@@ -1,7 +1,7 @@
 # btop on IBM AIX
 
 Patches that port [btop](https://github.com/aristocratos/btop) (resource monitor for the
-terminal) to IBM AIX, and a ready-to-install package for AIX 6.1 TL7 up to 7.3.
+terminal) to IBM AIX, and a ready-to-install package for AIX 6.1 technology level (TL) 7 up to 7.3.
 
 ![btop on AIX 7.1 (POWER9, 32 logical CPUs, eight busy loops); network address, process names and users blacked out](img/btop-aix.png)
 
@@ -40,7 +40,7 @@ The result is identical to the `aix-public` branch of the fork, which can be use
 | 0002 | Build system: CMake branch, presets `aix-openxl`, `aix71-openxl`, `aix61-openxl`, IBM Open XL toolchain files, Makefile platform `aix`, README section |
 | 0003 | Tooling to build for AIX 7.1 and 6.1 on a 7.2 host: sysroot preparation, `extern "C"` header wrappers, static libc++/libc++abi/libunwind 19.1.7 with two LLVM patches, compatibility headers |
 | 0004 | RPM spec and launcher, probes and check tools |
-| 0005 | Scripting API: core API, Lua 5.4.8 in a sandbox, `btop --mcp-stdio` (MCP server over stdio, tools in `mcp/tools.lua`), GTest suites |
+| 0005 | Scripting API: core API, Lua 5.4.8 in a sandbox, `btop --mcp-stdio` (server for the Model Context Protocol, MCP, over stdio; tools in `mcp/tools.lua`), GTest suites |
 
 Patches 0001 to 0004 are meant to change no behaviour on other platforms: their code changes outside `src/aix/`,
 `cmake/` and `tools/aix/` are behind `_AIX` or `CMAKE_SYSTEM_NAME STREQUAL "AIX"`, except the two shared fixes
@@ -54,9 +54,9 @@ sends signals through `Core::send_signal`. Without `--mcp-stdio` btop behaves as
 * **AIX 7.2 TL5 or 7.3**, IBM Open XL C/C++ 17.1.3 (LLVM 19, libc++ 19), CMake 3.25+, Ninja or GNU make:
   `OBJECT_MODE=64 cmake --preset aix-openxl && cmake --build --preset aix-openxl`.
   Compiler paths are absolute (`/opt/IBM/openxlC/17.1.3/bin/ibm-clang++_r`), see `cmake/Toolchain-aix-openxl.cmake`.
-* **AIX 7.1 and 6.1** have no C++23 compiler, and a binary built on 7.2 with the IBM runtime does not
-  load there (the runtime imports `strftime_l`, and the 7.2 `PTHREAD_MUTEX_INITIALIZER` layout differs
-  from 7.1). The binaries are therefore built on a 7.2 host against a sysroot taken from the target
+* **AIX 7.1 and 6.1** have no C++23 compiler. A binary does not load there if it was built on 7.2 with the
+  IBM runtime: the runtime imports `strftime_l`, and the layout of `PTHREAD_MUTEX_INITIALIZER` on 7.2 differs
+  from 7.1. The binaries are therefore built on a 7.2 host against a sysroot taken from the target
   release and a libc++ built statically against that sysroot. Steps, in `tools/aix/sysroot71/`:
   `make_sysroot.pl` (unpack the target's `/usr/include`, `/usr/ccs/lib`, selected `/usr/lib/*.a`),
   `make_cxxwrap.pl`, the two LLVM 19.1.7 patches, `build_rt.pl`, then
@@ -78,13 +78,15 @@ The release number counts per upstream version: `v1.4.8-aix1` follows `v1.4.7-ai
 |---|---|---|---|
 | `btop-<version>-<release>.aix6.1.ppc.rpm` (and the same tree as `.tar.gz`), attached to each [release](https://github.com/mawelo/aix-btop/releases) | AIX 6100-09 sysroot, static libc++ 19 | see the matrix below | AIX 6.1 TL7 and later, 7.1, 7.2, 7.3 (every technology level), because of the reasons given below |
 
-Test matrix of `v1.4.8-aix1` (`bd98045`), one run each on 2026-10-31; "load" = two single-threaded busy loops
-started next to btop, "launcher" = `opt/btop/bin/btop` started through a symlink in another directory, without `LANG`:
+The matrix lists one test run per AIX level with `v1.4.8-aix1` (`bd98045`) on 2026-10-31. The column rpm.rte
+gives the level of the installed `rpm.rte` fileset, taken from the software inventory of the hosts on 2026-10-30
+and 2026-10-31. "Load" means two single-threaded busy loops next to btop. "Launcher" means that
+`opt/btop/bin/btop` was started through a symlink in another directory, without `LANG`:
 
 | AIX level | rpm.rte | Installed via | Started | Under load | Removed again |
 |---|---|---|---|---|---|
-| 6100-07-10 | n/a (non-root user) | tar, in a private directory | yes, launcher | yes | yes |
-| 6100-09-04 | n/a (non-root user) | tar, in a private directory | yes, launcher | yes | yes |
+| 6100-07-10 | 4.13.0 (not used: test as non-root user) | tar, in a private directory | yes, launcher | yes | yes |
+| 6100-09-04 | 4.9.1 (not used: test as non-root user) | tar, in a private directory | yes, launcher | yes | yes |
 | 7100-02-01 | 3.0.5 | tar, in a private directory | yes, launcher | yes | yes |
 | 7100-05-03 | 4.13.0 | `rpm -ivh`, `rpm -V` | yes, through `/usr/bin/btop` | no | `rpm -e`, no files left |
 | 7200-05-05 | 4.15.1 | tar, in a private directory | yes, launcher | yes | yes |
@@ -95,7 +97,7 @@ On every tar host, `sh btop` and `ksh btop` inside `opt/btop/bin` started the bi
 `btop` came first in `PATH`, and a busy process whose name contained ESC and BEL showed up as `x?]0;PWNED?y`;
 invalid UTF-8 in a process name showed up as `?`.
 
-`btop --mcp-stdio` from the tar archive, without `LANG` and with the default tool registry, on 6100-07, 6100-09,
+`btop --mcp-stdio` from the tar archive, without `LANG` and with the default registry of tools, on 6100-07, 6100-09,
 7100-02, 7200-05 and 7300-04 (one run each): 7 answers to initialize, tools/list, three tool calls
 (cpu, processes, disks), an unknown tool and ping; no tool call returned an error, the unknown tool was rejected
 with JSON-RPC error -32602.
@@ -125,13 +127,13 @@ Why one binary is expected to cover all of them:
   7.1.0.1, 7.1.1.1, 7.2.5.201 and 7.3.1.0 (shortened to three digits above), not technology levels. The table
   is `tools/aix/probes/perfstat_layout/offsets_5.3-7.3.txt`, produced by the generator in the same directory
   (patch 0004); the IBM headers themselves are not included.
-* libperfstat rejects a `sizeof_struct` larger than the structure it was built with (`EINVAL`). The binary is
+* libperfstat rejects a `sizeof_struct` larger than the structure that it was built with (`EINVAL`). The binary is
   built against the 6100-09 sysroot, whose header has the 6.1.8 sizes, and on `EINVAL` shrinks the size in
   steps of 8 bytes until the call succeeds; fields beyond the accepted size read as zero. Measured: 6100-07
   accepts 616 instead of 624 for `perfstat_cpu_t` and 224 instead of 240 for `perfstat_netinterface_t`,
-  7100-02 accepts 616. A library whose structure is at least as large as the binary's accepts the size
-  unchanged; a smaller one (for `perfstat_netinterface_t` also 7.1 TL0/TL1 with 224, not measured) is handled by
-  the same probe. This applies to all six calls above.
+  7100-02 accepts 616. The library accepts the size unchanged if its structure is at least as large as the
+  binary's. The same probe handles a smaller structure. For `perfstat_netinterface_t` this also covers 7.1
+  TL0/TL1 with 224 bytes, which was not measured. This applies to all six calls above.
 * What the 6.1 C library lacks is replaced: `aligned_alloc` (missing before 6.1 TL9) by `posix_memalign`, and
   the POSIX 2008 locale calls inside the statically linked C++ runtime. 6.1 TL7 is the oldest level examined:
   its C library exports every symbol the binary imports; TL6 and older were not examined. btop itself calls
@@ -167,10 +169,11 @@ from; in this repository `rpm/rpm-info.txt` lists header, requirements and file 
 
 ## What the port shows
 
-CPU, load and frequency from libperfstat (DLPAR changes are followed), memory and paging space, mounted
-file systems plus the physical volumes (`hdiskN`) with their I/O, network interfaces, processes
-(kernel `wait` processes hidden). Per file system I/O needs LVM statistics (`lvmstat -e`). Inside a
-WPAR the header shows "WPAR". Not available on AIX: sensors, battery, GPU.
+btop shows CPU, load and frequency from libperfstat and follows changes by dynamic LPAR (DLPAR). It also
+shows memory and paging space, mounted file systems plus the physical volumes (`hdiskN`) with their I/O,
+network interfaces, and processes (kernel `wait` processes hidden). Per file system I/O needs LVM statistics
+(`lvmstat -e`). Inside a workload partition (WPAR) the header shows "WPAR". btop shows no sensors, battery or
+GPU on AIX.
 
 `btop --mcp-stdio` runs without a terminal and answers MCP clients with read-only measurements, for example
 `ssh user@host /opt/btop/bin/btop --mcp-stdio` as the server command of the client. The tools are listed in
@@ -184,7 +187,7 @@ is a no-op. btop uses neither.
 
 ## Verifying the download
 
-The RPM carries an OpenPGP header signature, and `SHA256SUMS.asc` is a detached signature over `SHA256SUMS`.
+The RPM carries an OpenPGP signature in its header, and `SHA256SUMS.asc` is a detached signature over `SHA256SUMS`.
 Signing key: `aix-btop package signing <mawelo@users.noreply.github.com>`, RSA 4096, fingerprint
 `4C28 DC73 FAC1 2125 F8E3 6A04 CF43 58E9 DA7A DDD4`, public key in `KEYS` (also compare the fingerprint
 with the one shown on the GitHub profile or in the release notes, not only with this file).
@@ -208,11 +211,13 @@ tag. On such hosts verify `SHA256SUMS.asc` with GnuPG on any other machine and c
 
 ## Support and funding
 
-If the AIX port is useful to you, a donation through [PayPal.me/mawelo](https://paypal.me/mawelo) is welcome.
+If the AIX port is useful, a donation through [PayPal.me/mawelo](https://paypal.me/mawelo) is welcome.
 btop itself is the work of its upstream author, see the "Support and funding" section of the
 [upstream README](https://github.com/aristocratos/btop#support-and-funding).
 
 ## License
 
-btop is licensed under the Apache License 2.0 (see `LICENSE`); the patches and packaging files in
-this repository are published under the same license.
+btop is licensed under the Apache License 2.0 (see `LICENSE`). The patches and packaging files in this
+repository are published under the same license, with two exceptions that patch 0005 adds unchanged:
+Lua 5.4.8 in `libs/lua-5.4.8` (MIT, see `libs/lua-5.4.8/LICENSE`) and nlohmann/json 3.x in
+`libs/reuse/json.hpp` (MIT, notice in the file).

@@ -4,7 +4,7 @@
 
 Please report security problems of the AIX port or of the packages privately through
 [GitHub private vulnerability reporting](https://github.com/mawelo/aix-btop/security/advisories/new),
-not as a public issue. Problems in btop itself that are not specific to AIX belong to the
+not as a public issue. Problems that are not specific to AIX belong to the
 [upstream project](https://github.com/aristocratos/btop).
 
 ## Supported releases
@@ -40,10 +40,10 @@ passed unchanged. Use a UTF-8 terminal, which btop needs anyway.
 
 Upstream btop has the same problem in its process list: [aristocratos/btop#1846](https://github.com/aristocratos/btop/issues/1846)
 (escape sequences through the process name). The issue was closed as "not planned" on 2026-10-18 without a
-comment; upstream `main` has no fix as of 2026-10-19 (last checked commit `4792b07`). This port closes the paths
+comment; upstream `main` has no fix as of 2026-10-31 (last checked commit `fd1d292`, after the release v1.4.8). This port closes the paths
 listed there: the process name (`v1.4.7-aix4`), the shortened command in the narrow tree view, DEL and UTF-8 encoded
-C1 controls (`v1.4.7-aix4`), and invalid UTF-8 (`v1.4.8-aix1`). An upstream build on AIX or any other platform does
-not include these fixes.
+C1 controls (`v1.4.7-aix4`), and invalid UTF-8 (`v1.4.8-aix1`). Upstream builds do not include these fixes, on AIX or
+any other platform.
 
 ## Verifying packages
 
