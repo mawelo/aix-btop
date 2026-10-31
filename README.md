@@ -88,6 +88,7 @@ started next to btop, "launcher" = `opt/btop/bin/btop` started through a symlink
 | 7100-02-01 | 3.0.5 | tar, in a private directory | yes, launcher | yes | yes |
 | 7100-05-03 | 4.13.0 | `rpm -ivh`, `rpm -V` | yes, through `/usr/bin/btop` | no | `rpm -e`, no files left |
 | 7200-05-05 | 4.15.1 | tar, in a private directory | yes, launcher | yes | yes |
+| 7300-02-01 | 4.18.1 | `rpm -Uvh` of the signed release package over `v1.4.7-aix4`, `rpm -V`, no group- or world-writable files | `--version` only | no | no (kept installed) |
 | 7300-04-00 | 4.20.1 | `rpm -ivh`, `rpm -V` | yes, through `/usr/bin/btop` | yes | `rpm -e`, no files left |
 
 On every tar host, `sh btop` and `ksh btop` inside `opt/btop/bin` started the binary next to them although another
@@ -99,15 +100,12 @@ invalid UTF-8 in a process name showed up as `?`.
 (cpu, processes, disks), an unknown tool and ping; no tool call returned an error, the unknown tool was rejected
 with JSON-RPC error -32602.
 
-7300-02-01 runs `v1.4.7-aix4` (installed with `rpm -Uvh` over `v1.4.7-aix3`, `--version` only); that host is updated
-to `v1.4.8-aix1` after the publication.
-
 With `v1.4.7-aix3`, on the 7200-05 test host `rpm -ivh` returned 1 and both `rpm -ivh` and `rpm -e` printed `rpm_share: 0645-007 ATTENTION:
 whichfs() returned an unexpected result`, although the files were installed and removed correctly. The cause is a
 host-specific mount layout that `rpm_share` cannot map to a file system.
 This is a property of the host, not of the package.
 
-Not tested: 6.1 TL8, 7.1 TL0/TL1/TL3/TL4, 7.2 TL0 to TL4, 7.3 TL0/TL1/TL3 (TL2: `v1.4.7-aix4`, install and `--version` only). Note that AIX 6.1 and 7.1 are out of
+Not tested: 6.1 TL8, 7.1 TL0/TL1/TL3/TL4, 7.2 TL0 to TL4, 7.3 TL0/TL1/TL3 (TL2: update and `--version` only). Note that AIX 6.1 and 7.1 are out of
 IBM support; the port does not change that.
 
 Why one binary is expected to cover all of them:
