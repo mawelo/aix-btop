@@ -1,8 +1,8 @@
 # Test matrix and package contents
 
-Reading time: 3 min
+Reading time: 4 min
 
-Applies to: `v1.4.8-aix2` (fork commit `2bbf1e5`)    Verified: 2026-11-01    Revision: 3
+Applies to: `v1.4.8-aix2` (fork commit `2bbf1e5`)    Verified: 2026-11-01    Revision: 4
 
 ## Package
 
@@ -20,7 +20,8 @@ gives the level of the installed `rpm.rte` fileset, taken from the software inve
 and 2026-10-31. "Load" means two single-threaded busy loops next to btop. "Launcher" means that
 `opt/btop/bin/btop` was started through a symlink in another directory, without `LANG`.
 
-The runs used the RPM and the tar archive of the CI build before signing. The released RPM has the same payload
+The runs used the RPM and the tar archive of the CI build before signing, except on 7300-02-01, which got the
+signed release package. The released RPM has the same payload
 (sha256 of the `rpm2cpio` output) and adds the header signature. The released tar archive is the same file.
 
 | AIX level | rpm.rte | Installed via | Started | Under load | Removed again |
@@ -30,6 +31,7 @@ The runs used the RPM and the tar archive of the CI build before signing. The re
 | 7100-02-01 | 3.0.5 | tar, in a private directory | yes, launcher | yes | yes |
 | 7100-05-03 | 4.13.0 | `rpm -ivh`, `rpm -V` | yes, through `/usr/bin/btop` | no | `rpm -e`, no files left |
 | 7200-05-05 | 4.15.1 | tar, in a private directory | yes, launcher | yes | yes |
+| 7300-02-01 | 4.18.1 | `rpm -Uvh` of the signed release package over `v1.4.8-aix1`, `rpm -V`, no group- or world-writable files | `--version` only | no | no (kept installed) |
 | 7300-04-00 | 4.20.1 | `rpm -ivh`, `rpm -V` | yes, through `/usr/bin/btop` | yes | `rpm -e`, no files left |
 
 On every tar host, `sh btop` and `ksh btop` inside `opt/btop/bin` started the binary next to them, although another
@@ -45,7 +47,7 @@ unknown tool with JSON-RPC error -32602.
 
 ## Not tested
 
-These levels were not tested: 6.1 TL8, 7.1 TL0/TL1/TL3/TL4, 7.2 TL0 to TL4, and 7.3 TL0/TL1/TL3. On 7.3 TL2 the update from `v1.4.8-aix1` has not run yet. With this release, `rpm -K` did not run on AIX, and the signed RPM was not installed there. AIX 6.1 and 7.1 are out of IBM support; the port does not change that.
+These levels were not tested: 6.1 TL8, 7.1 TL0/TL1/TL3/TL4, 7.2 TL0 to TL4, and 7.3 TL0/TL1/TL3. With this release, `rpm -K` did not run on AIX. On 7300-02-01, `rpm -Uvh` reported `NOKEY` for the signature, because `KEYS` is not imported there; the signature was therefore not checked on AIX. AIX 6.1 and 7.1 are out of IBM support; the port does not change that.
 
 ## Files of the package
 
