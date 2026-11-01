@@ -1,6 +1,6 @@
-From f8a47954d972a1daa09f721489571ccd14d959d1 Mon Sep 17 00:00:00 2001
+From 9c64d3cdd5a50faef19dc87a832f7e0f3d0e423e Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Sat, 31 Oct 2026 12:54:45 +0100
+Date: Sun, 1 Nov 2026 08:24:23 +0100
 Subject: [PATCH 1/5] [AI generated] AIX: platform layer (perfstat, mntctl,
  getprocs64), getifaddrs replacement, executable path
 
@@ -45,18 +45,18 @@ Shared fixes found on AIX:
 
 Not available on AIX: sensors, battery, GPU.
 ---
- src/aix/aix_ifaddrs.cpp  |  122 +++
- src/aix/aix_ifaddrs.hpp  |   56 ++
- src/aix/aix_selfpath.cpp |   80 ++
- src/aix/aix_selfpath.hpp |   39 +
- src/aix/btop_collect.cpp | 1526 ++++++++++++++++++++++++++++++++++++++
+ src/aix/aix_ifaddrs.cpp  |  130 ++++
+ src/aix/aix_ifaddrs.hpp  |   63 ++
+ src/aix/aix_selfpath.cpp |   88 +++
+ src/aix/aix_selfpath.hpp |   47 ++
+ src/aix/btop_collect.cpp | 1537 ++++++++++++++++++++++++++++++++++++++
  src/btop.cpp             |   31 +-
  src/btop_input.cpp       |   18 +
  src/btop_menu.cpp        |   23 +-
  src/btop_shared.hpp      |    6 +-
  src/btop_theme.cpp       |    1 -
  src/btop_tools.cpp       |   11 +-
- 11 files changed, 1900 insertions(+), 13 deletions(-)
+ 11 files changed, 1942 insertions(+), 13 deletions(-)
  create mode 100644 src/aix/aix_ifaddrs.cpp
  create mode 100644 src/aix/aix_ifaddrs.hpp
  create mode 100644 src/aix/aix_selfpath.cpp
@@ -65,10 +65,10 @@ Not available on AIX: sensors, battery, GPU.
 
 diff --git a/src/aix/aix_ifaddrs.cpp b/src/aix/aix_ifaddrs.cpp
 new file mode 100644
-index 0000000..23f1c22
+index 0000000..0af9f66
 --- /dev/null
 +++ b/src/aix/aix_ifaddrs.cpp
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,130 @@
 +/* Copyright 2026 Martin Lonkwitz (btop-aix)
 +
 +   Licensed under the Apache License, Version 2.0 (the "License");
@@ -82,6 +82,14 @@ index 0000000..23f1c22
 +   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 +   See the License for the specific language governing permissions and
 +   limitations under the License.
++
++Project : btop-aix, 2026-10-12
++What    : getifaddrs(3) and freeifaddrs(3) for AIX on top of the ioctls SIOCGSIZIFCONF, SIOCGIFCONF and SIOCGIFFLAGS.
++          Only ifa_next, ifa_name, ifa_flags and ifa_addr are filled (see aix_ifaddrs.hpp).
++Why     : AIX 7.1 to 7.3 have no getifaddrs in libc; btop needs the addresses of the network interfaces.
++Deps    : aix_ifaddrs.hpp, <sys/ioctl.h>, libc
++Usage   : see aix_ifaddrs.hpp
++History : git log -- src/aix/aix_ifaddrs.cpp
 +
 +indent = tab
 +tab-size = 4
@@ -193,10 +201,10 @@ index 0000000..23f1c22
 +}
 diff --git a/src/aix/aix_ifaddrs.hpp b/src/aix/aix_ifaddrs.hpp
 new file mode 100644
-index 0000000..ab6d283
+index 0000000..db7cd69
 --- /dev/null
 +++ b/src/aix/aix_ifaddrs.hpp
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,63 @@
 +/* Copyright 2026 Martin Lonkwitz (btop-aix)
 +
 +   Licensed under the Apache License, Version 2.0 (the "License");
@@ -210,6 +218,13 @@ index 0000000..ab6d283
 +   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 +   See the License for the specific language governing permissions and
 +   limitations under the License.
++
++Project : btop-aix, 2026-10-12
++What    : Declarations of getifaddrs(3) and freeifaddrs(3) for AIX, which has neither the header nor the functions.
++Why     : btop_shared.hpp (IfAddrsPtr) and the network collector use getifaddrs on every platform.
++Deps    : <sys/socket.h>, <net/if.h>; implementation in aix_ifaddrs.cpp
++Usage   : #include "aix_ifaddrs.hpp", then call getifaddrs(&list) and freeifaddrs(list) as on Linux.
++History : git log -- src/aix/aix_ifaddrs.hpp
 +
 +indent = tab
 +tab-size = 4
@@ -255,10 +270,10 @@ index 0000000..ab6d283
 +#endif // _AIX
 diff --git a/src/aix/aix_selfpath.cpp b/src/aix/aix_selfpath.cpp
 new file mode 100644
-index 0000000..94333c6
+index 0000000..4fb2532
 --- /dev/null
 +++ b/src/aix/aix_selfpath.cpp
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,88 @@
 +/* Copyright 2026 Martin Lonkwitz (btop-aix)
 +
 +   Licensed under the Apache License, Version 2.0 (the "License");
@@ -272,6 +287,14 @@ index 0000000..94333c6
 +   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 +   See the License for the specific language governing permissions and
 +   limitations under the License.
++
++Project : btop-aix, 2026-10-12
++What    : Implementation of Aix::executable_dir() (getprocs64 and getargs give argv[0], resolved against the working
++          directory or PATH) and Aix::canonical() (realpath with a PATH_MAX buffer).
++Why     : see aix_selfpath.hpp; libc++ calls realpath(p, NULL), which some AIX levels reject with EINVAL.
++Deps    : aix_selfpath.hpp, libc (procinfo.h, unistd.h)
++Usage   : see aix_selfpath.hpp
++History : git log -- src/aix/aix_selfpath.cpp
 +
 +tab-size = 4
 +*/
@@ -341,10 +364,10 @@ index 0000000..94333c6
 +}
 diff --git a/src/aix/aix_selfpath.hpp b/src/aix/aix_selfpath.hpp
 new file mode 100644
-index 0000000..f19d111
+index 0000000..42bdd33
 --- /dev/null
 +++ b/src/aix/aix_selfpath.hpp
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,47 @@
 +/* Copyright 2026 Martin Lonkwitz (btop-aix)
 +
 +   Licensed under the Apache License, Version 2.0 (the "License");
@@ -358,6 +381,14 @@ index 0000000..f19d111
 +   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 +   See the License for the specific language governing permissions and
 +   limitations under the License.
++
++Project : btop-aix, 2026-10-12
++What    : Aix::executable_dir() and Aix::canonical(); the comment below the license describes both.
++Why     : btop finds its themes next to the binary. Linux, macOS and NetBSD have a system call for the path of the
++          running executable; AIX has none.
++Deps    : libc (procinfo.h); implementation in aix_selfpath.cpp
++Usage   : Global::self_path = Aix::executable_dir();   (src/btop.cpp)
++History : git log -- src/aix/aix_selfpath.hpp
 +
 +tab-size = 4
 +*/
@@ -386,10 +417,10 @@ index 0000000..f19d111
 +}
 diff --git a/src/aix/btop_collect.cpp b/src/aix/btop_collect.cpp
 new file mode 100644
-index 0000000..18ab765
+index 0000000..300e338
 --- /dev/null
 +++ b/src/aix/btop_collect.cpp
-@@ -0,0 +1,1526 @@
+@@ -0,0 +1,1537 @@
 +/* Copyright 2026 Martin Lonkwitz (btop-aix)
 +
 +   Licensed under the Apache License, Version 2.0 (the "License");
@@ -403,6 +434,17 @@ index 0000000..18ab765
 +   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 +   See the License for the specific language governing permissions and
 +   limitations under the License.
++
++Project : btop-aix, 2026-10-12
++What    : Platform layer of btop for IBM AIX 6.1 TL7 and later: Shared::init and the collectors of the namespaces
++          Cpu, Mem, Net and Proc. The data sources are listed in the comment below the license.
++Why     : btop has one platform layer per operating system (src/linux, src/osx, src/freebsd, ...); AIX had none.
++Deps    : libperfstat, libc (getprocs64, getargs, mntctl, statvfs), aix_ifaddrs.hpp, ../btop_shared.hpp,
++          ../btop_config.hpp, ../btop_tools.hpp, ../btop_log.hpp
++Usage   : CMakeLists.txt and the Makefile compile this file on AIX instead of the other platform layers; the shared
++          code calls Cpu::collect, Mem::collect, Net::collect and Proc::collect as on every platform.
++Docs    : docs/aix/reference/porting-pitfalls.md
++History : git log -- src/aix/btop_collect.cpp
 +
 +indent = tab
 +tab-size = 4

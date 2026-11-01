@@ -13,7 +13,8 @@ Only the latest release receives fixes.
 
 | Release | Status |
 |---|---|
-| `v1.4.8-aix1` and later | supported |
+| `v1.4.8-aix2` | supported |
+| `v1.4.8-aix1` | superseded by `v1.4.8-aix2`; no known security problem |
 | `v1.4.7-aix4` | superseded: invalid UTF-8 in process names passed unchanged (matters only on a terminal in 8-bit mode); on AIX 6.1 and 7.1 the main loop spun for up to one second per update cycle (both fixed in `v1.4.8-aix1`) |
 | `v1.4.7-aix3` | superseded: control characters in process names reached the terminal of the user running btop (fixed in `v1.4.7-aix4`) |
 | `v1.4.7-aix1`, `v1.4.7-aix2` | withdrawn: the themes were group-writable (`v1.4.7-aix1` tar: also owned by uid/gid 1000); control characters as in `v1.4.7-aix3` |
@@ -47,6 +48,6 @@ any other platform.
 
 ## Verifying packages
 
-Each release is signed; see "Verifying the download" in the README. Signing key fingerprint:
+Each release is signed; `docs/install.md`, step 1, shows how to verify it. Signing key fingerprint:
 `4C28 DC73 FAC1 2125 F8E3 6A04 CF43 58E9 DA7A DDD4`, also listed on
 [github.com/mawelo.gpg](https://github.com/mawelo.gpg).

@@ -1,6 +1,6 @@
-From 4769d1f610cfe5b22fdda79a9ae5abf52eb2f33d Mon Sep 17 00:00:00 2001
+From 7a0fde6ca39926f9ecbd95ea38a0381afc85c969 Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Sat, 31 Oct 2026 12:54:45 +0100
+Date: Sun, 1 Nov 2026 08:24:23 +0100
 Subject: [PATCH 4/5] [AI generated] AIX: RPM packaging (spec, launcher),
  probes and check tools
 
@@ -8,7 +8,9 @@ Subject: [PATCH 4/5] [AI generated] AIX: RPM packaging (spec, launcher),
   digests and gzip payload so that rpm.rte 4.9 can read the package),
   btop.sh launcher (adds --force-utf when no UTF-8 locale is active, defaults
   TERM to xterm-256color), build_rpm.pl (stages the file tree once, builds RPM
-  and an equivalent tar archive, writes rpm-info.txt), README.AIX.
+  and an equivalent tar archive, writes rpm-info.txt), README.AIX,
+  THIRD-PARTY-NOTICES.txt (MIT texts of Lua and nlohmann/json, installed in
+  /opt/btop/share/doc/btop).
 * tools/aix/probes: perfstat_sizes.cpp (structure sizes across releases),
   cxxrt_probe.cpp (C++23 runtime smoke test), pthread_probe.c (static mutex
   initializer across releases), libcall_probe.c (___strlen64/___strcmp64),
@@ -38,12 +40,13 @@ Subject: [PATCH 4/5] [AI generated] AIX: RPM packaging (spec, launcher),
  tools/aix/probes/rusage_probe.c               |  64 ++++
  tools/aix/probes/selfpath_probe.cpp           |  40 +++
  tools/aix/rpm/README.AIX                      |  72 ++++
+ tools/aix/rpm/THIRD-PARTY-NOTICES.txt         |  56 +++
  tools/aix/rpm/btop.sh                         |  32 ++
  tools/aix/rpm/btop.spec                       |  89 +++++
- tools/aix/rpm/build_rpm.pl                    | 106 ++++++
+ tools/aix/rpm/build_rpm.pl                    | 107 ++++++
  tools/aix/shim/strftime_l_shim.c              |  33 ++
  tools/aix/shim/strftime_l_shim.exp            |   1 +
- 23 files changed, 1302 insertions(+)
+ 24 files changed, 1359 insertions(+)
  create mode 100755 tools/aix/ansi_render.pl
  create mode 100755 tools/aix/check_imports.pl
  create mode 100644 tools/aix/probes/cxxrt_probe.cpp
@@ -62,6 +65,7 @@ Subject: [PATCH 4/5] [AI generated] AIX: RPM packaging (spec, launcher),
  create mode 100644 tools/aix/probes/rusage_probe.c
  create mode 100644 tools/aix/probes/selfpath_probe.cpp
  create mode 100644 tools/aix/rpm/README.AIX
+ create mode 100644 tools/aix/rpm/THIRD-PARTY-NOTICES.txt
  create mode 100644 tools/aix/rpm/btop.sh
  create mode 100644 tools/aix/rpm/btop.spec
  create mode 100644 tools/aix/rpm/build_rpm.pl
@@ -1141,7 +1145,7 @@ index 0000000..310b361
 +}
 diff --git a/tools/aix/rpm/README.AIX b/tools/aix/rpm/README.AIX
 new file mode 100644
-index 0000000..06b9854
+index 0000000..63cea89
 --- /dev/null
 +++ b/tools/aix/rpm/README.AIX
 @@ -0,0 +1,72 @@
@@ -1194,7 +1198,7 @@ index 0000000..06b9854
 +    /opt/btop/bin/btop             launcher (shell script)
 +    /opt/btop/bin/btop.bin         the program (64-bit XCOFF, static C++ runtime)
 +    /opt/btop/share/btop/themes    themes shipped with btop
-+    /opt/btop/share/doc/btop       README.md, LICENSE, this file
++    /opt/btop/share/doc/btop       README.md, LICENSE, THIRD-PARTY-NOTICES.txt, this file
 +    /usr/bin/btop                  symlink to the launcher (RPM; optional with the tar)
 +    ~/.config/btop                 per user configuration
 +    ~/.local/state/btop.log        per user log
@@ -1217,6 +1221,68 @@ index 0000000..06b9854
 +the patch series, the upstream base commit and the signed release files are
 +in https://github.com/mawelo/aix-btop. `btop --version` prints the
 +commit the binary was built from.
+diff --git a/tools/aix/rpm/THIRD-PARTY-NOTICES.txt b/tools/aix/rpm/THIRD-PARTY-NOTICES.txt
+new file mode 100644
+index 0000000..cb2c09f
+--- /dev/null
++++ b/tools/aix/rpm/THIRD-PARTY-NOTICES.txt
+@@ -0,0 +1,56 @@
++Third-party notices for the btop package on AIX
++
++The btop binary in this package contains code from two projects under the MIT license.
++The license of btop itself is in LICENSE (Apache License 2.0).
++
++==============================================================================
++Lua 5.4.8 (https://www.lua.org), source: libs/lua-5.4.8
++==============================================================================
++
++Copyright (C) 1994-2025 Lua.org, PUC-Rio.
++
++Permission is hereby granted, free of charge, to any person obtaining
++a copy of this software and associated documentation files (the
++"Software"), to deal in the Software without restriction, including
++without limitation the rights to use, copy, modify, merge, publish,
++distribute, sublicense, and/or sell copies of the Software, and to
++permit persons to whom the Software is furnished to do so, subject to
++the following conditions:
++
++The above copyright notice and this permission notice shall be
++included in all copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
++IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
++CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
++TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
++SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++
++==============================================================================
++JSON for Modern C++ 3.12.0 (https://github.com/nlohmann/json), source: libs/reuse/json.hpp
++==============================================================================
++
++MIT License
++
++Copyright (c) 2013-2025 Niels Lohmann
++
++Permission is hereby granted, free of charge, to any person obtaining
++a copy of this software and associated documentation files (the
++"Software"), to deal in the Software without restriction, including
++without limitation the rights to use, copy, modify, merge, publish,
++distribute, sublicense, and/or sell copies of the Software, and to
++permit persons to whom the Software is furnished to do so, subject to
++the following conditions:
++
++The above copyright notice and this permission notice shall be
++included in all copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
++IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
++CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
++TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
++SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 diff --git a/tools/aix/rpm/btop.sh b/tools/aix/rpm/btop.sh
 new file mode 100644
 index 0000000..a4dd224
@@ -1352,15 +1418,15 @@ index 0000000..34a95a2
 +- AIX port of btop: perfstat, mntctl, getprocs64; static libc++ built against AIX 6.1, one package for 6.1 TL7 to 7.3
 diff --git a/tools/aix/rpm/build_rpm.pl b/tools/aix/rpm/build_rpm.pl
 new file mode 100644
-index 0000000..430718e
+index 0000000..e9f67a4
 --- /dev/null
 +++ b/tools/aix/rpm/build_rpm.pl
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,107 @@
 +#!/usr/bin/perl
 +# build_rpm.pl -- project btop-aix (2026-10-12)
 +#
 +# Who/what: Runs on the AIX build host and builds the binary RPM and an equivalent tar archive of btop from a
-+#           finished binary and the source tree (themes, README, LICENSE). The file tree (/opt/btop, /usr/bin/btop)
++#           finished binary and the source tree (themes, README, LICENSE, THIRD-PARTY-NOTICES.txt). The file tree (/opt/btop, /usr/bin/btop)
 +#           is laid out ONCE; spec and tar take it over unchanged (one source for the layout).
 +# When    : 2026-10-12.
 +# Why     : One installable package for all AIX levels from 6.1 TL7 on (decision 2026-10-12: only the 6.1 build is
@@ -1398,7 +1464,8 @@ index 0000000..430718e
 +my $spec   = $o{spec} || "$src/tools/aix/rpm/btop.spec";
 +my $launch = "$src/tools/aix/rpm/btop.sh";
 +my $readme = "$src/tools/aix/rpm/README.AIX";
-+for ($spec, $launch, $readme, "$src/README.md", "$src/LICENSE") { die "$_: missing\n" unless -f $_ }
++my $notices = "$src/tools/aix/rpm/THIRD-PARTY-NOTICES.txt";   # MIT texts of Lua and nlohmann/json (compiled into btop)
++for ($spec, $launch, $readme, $notices, "$src/README.md", "$src/LICENSE") { die "$_: missing\n" unless -f $_ }
 +
 +# version from the source tree (Global::Version in src/btop.cpp), never typed in
 +my $version = '';
@@ -1421,7 +1488,7 @@ index 0000000..430718e
 +run('cp', '-Rp', "$src/themes", "$tree/opt/btop/share/btop/themes");
 +# MCP tool registry (btop --mcp-stdio, src/btop_mcp.cpp); the spec lists /opt/btop/share/btop/mcp
 +run('cp', '-Rp', "$src/mcp", "$tree/opt/btop/share/btop/mcp");
-+for my $d ("$src/README.md", "$src/LICENSE", $readme) { copy($d, "$tree/opt/btop/share/doc/btop/" . basename($d)) or die "copy $d: $!" }
++for my $d ("$src/README.md", "$src/LICENSE", $notices, $readme) { copy($d, "$tree/opt/btop/share/doc/btop/" . basename($d)) or die "copy $d: $!" }
 +symlink('/opt/btop/bin/btop', "$tree/usr/bin/btop") or die "symlink: $!";
 +# modes independent of the build host umask (release 2 shipped themes 0664 and directories 0775 because cp -Rp
 +# copied the modes of the checkout). Applies to RPM (plus %defattr in the spec) and tar.

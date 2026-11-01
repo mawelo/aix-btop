@@ -1,6 +1,6 @@
-From 7d992f124333aeed4cf9bd4b011cc863f30e1cc4 Mon Sep 17 00:00:00 2001
+From e2007214d0c1ef5c41ae57f2d39f07629eed0e8f Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Sat, 31 Oct 2026 12:54:45 +0100
+Date: Sun, 1 Nov 2026 08:24:23 +0100
 Subject: [PATCH 2/5] [AI generated] AIX: build system (CMake, presets, IBM
  Open XL toolchain files, Makefile), README section
 
@@ -15,22 +15,41 @@ Subject: [PATCH 2/5] [AI generated] AIX: build system (CMake, presets, IBM
 * Makefile: platform aix (gmake, no LTO), sources via $(wildcard) because AIX
   find has no -maxdepth.
 * README.md: section "Compilation AIX".
+* docs/aix: how to build for AIX 7.1 and 6.1, why that needs a sysroot and a
+  static libc++, and the AIX pitfalls met while porting (reference).
 ---
- CMakeLists.txt                           | 31 +++++++-
- CMakePresets.json                        | 96 ++++++++++++++++++++++++
- Makefile                                 | 18 ++++-
- README.md                                | 45 +++++++++++
- cmake/Toolchain-aix-openxl.cmake         | 25 ++++++
- cmake/Toolchain-aix-sysroot-openxl.cmake | 38 ++++++++++
- 6 files changed, 248 insertions(+), 5 deletions(-)
+ CMakeLists.txt                             |  33 ++++-
+ CMakePresets.json                          |  96 +++++++++++++++
+ Makefile                                   |  20 +++-
+ README.md                                  |  47 +++++++-
+ cmake/Toolchain-aix-openxl.cmake           |  25 ++++
+ cmake/Toolchain-aix-sysroot-openxl.cmake   |  38 ++++++
+ docs/aix/README.md                         |  11 ++
+ docs/aix/explanation/older-aix-releases.md |  89 ++++++++++++++
+ docs/aix/howto/build-for-older-aix.md      | 133 +++++++++++++++++++++
+ docs/aix/reference/porting-pitfalls.md     |  60 ++++++++++
+ 10 files changed, 544 insertions(+), 8 deletions(-)
  create mode 100644 CMakePresets.json
  create mode 100644 cmake/Toolchain-aix-openxl.cmake
  create mode 100644 cmake/Toolchain-aix-sysroot-openxl.cmake
+ create mode 100644 docs/aix/README.md
+ create mode 100644 docs/aix/explanation/older-aix-releases.md
+ create mode 100644 docs/aix/howto/build-for-older-aix.md
+ create mode 100644 docs/aix/reference/porting-pitfalls.md
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 2cbbccd..9e28b85 100644
+index 2cbbccd..d7ad2d6 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
+@@ -22,7 +22,7 @@ include(CMakeDependentOption)
+ # Make our Find<Package>.cmake files available
+ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
+ 
+-set(CMAKE_CXX_STANDARD 23)
++set(CMAKE_CXX_STANDARD 26)
+ set(CMAKE_CXX_STANDARD_REQUIRED ON)
+ set(CMAKE_CXX_EXTENSIONS OFF)
+ set(CMAKE_COLOR_DIAGNOSTICS ON)
 @@ -56,10 +56,24 @@ add_library(libbtop OBJECT
    src/btop_shared.cpp
    src/btop_theme.cpp
@@ -92,7 +111,7 @@ index 2cbbccd..9e28b85 100644
    find_package(proplib REQUIRED)
    target_link_libraries(libbtop kvm::kvm proplib::proplib)
 +elseif(CMAKE_SYSTEM_NAME STREQUAL "AIX")
-+  # _ALL_SOURCE: with -std=c++23 (strict ANSI) the AIX headers hide BSD and
++  # _ALL_SOURCE: with -std=c++26 (strict ANSI) the AIX headers hide BSD and
 +  # XPG extensions such as sa_len, SIOCGIFCONF or getprocs64().
 +  target_compile_definitions(libbtop PUBLIC _ALL_SOURCE _THREAD_SAFE)
 +  # libperfstat: CPU, memory, disk and network counters
@@ -211,7 +230,7 @@ index 0000000..32e2392
 +  ]
 +}
 diff --git a/Makefile b/Makefile
-index d08b59a..3498229 100644
+index d08b59a..294bae3 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -194,6 +194,13 @@ else ifeq ($(PLATFORM_LC),netbsd)
@@ -221,7 +240,7 @@ index d08b59a..3498229 100644
 +else ifeq ($(PLATFORM_LC),aix)
 +	PLATFORM_DIR := aix
 +	THREADS	:= $(shell lsdev -Cc processor 2>/dev/null | grep -c Available || echo 1)
-+	#? 64-bit objects; _ALL_SOURCE unhides BSD/XPG extensions under -std=c++23; libperfstat for all counters
++	#? 64-bit objects; _ALL_SOURCE unhides BSD/XPG extensions under -std=c++26; libperfstat for all counters
 +	override ADDFLAGS += -m64 -D_ALL_SOURCE -D_THREAD_SAFE -lperfstat
 +	export MAKE = gmake
 +	SU_GROUP := system
@@ -242,6 +261,15 @@ index d08b59a..3498229 100644
  		LTO := -flto=thin
  	else
  		LTO := -flto=$(THREADS)
+@@ -232,7 +241,7 @@ OBJEXT		:= o
+ override GOODFLAGS := $(foreach flag,$(TESTFLAGS),$(strip $(shell echo "int main() {}" | $(CXX) -o /dev/null $(flag) -x c++ - >/dev/null 2>&1 && echo $(flag) || true)))
+ 
+ #? Flags, Libraries and Includes
+-override REQFLAGS   := -std=c++23
++override REQFLAGS   := -std=c++26
+ WARNFLAGS			:= -Wall -Wextra -pedantic
+ OPTFLAGS			:= -O2 $(LTO)
+ LDCXXFLAGS			:= -pthread -DFMT_HEADER_ONLY -D_GLIBCXX_ASSERTIONS -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG -D_FILE_OFFSET_BITS=64 $(GOODFLAGS) $(ADDFLAGS)
 @@ -245,9 +254,10 @@ ifdef DEBUG
  	override OPTFLAGS := -O0 -g
  endif
@@ -256,9 +284,18 @@ index d08b59a..3498229 100644
  OBJECTS	:= $(patsubst $(SRCDIR)/%,$(BUILDDIR)/%,$(SOURCES:.$(SRCEXT)=.$(OBJEXT)))
  
 diff --git a/README.md b/README.md
-index 9b0c293..5194f5a 100644
+index 9b0c293..3e01e33 100644
 --- a/README.md
 +++ b/README.md
+@@ -10,7 +10,7 @@
+ ![NetBSD](https://img.shields.io/badge/-NetBSD-black?logo=netbsd)
+ ![OpenBSD](https://img.shields.io/badge/-OpenBSD-black?logo=openbsd)
+ ![Usage](https://img.shields.io/badge/Usage-System%20resource%20monitor-yellow)
+-![c++23](https://img.shields.io/badge/cpp-c%2B%2B23-green)
++![c++26](https://img.shields.io/badge/cpp-c%2B%2B26-green)
+ ![latest_release](https://img.shields.io/github/v/tag/aristocratos/btop?label=release)
+ [![Donate](https://img.shields.io/badge/-Donate-yellow?logo=paypal)](https://paypal.me/aristocratos)
+ [![Sponsor](https://img.shields.io/badge/-Sponsor-red?logo=github)](https://github.com/sponsors/aristocratos)
 @@ -39,6 +39,7 @@
  * [Compilation FreeBSD](#compilation-freebsd)
  * [Compilation NetBSD](#compilation-netbsd)
@@ -274,8 +311,8 @@ index 9b0c293..5194f5a 100644
 +## Compilation AIX
 +
 +   Supported: AIX 7.2 TL5 and 7.3 with IBM Open XL C/C++ 17.1.3 or newer (LLVM 19 based, ships libc++ 19).
-+   AIX 7.1 has no C++23 compiler; a 7.1 binary is built on a 7.2 host against a 7.1 sysroot with a
-+   static libc++, see `docs/aix-port.md`.
++   AIX 7.1 has no C++26 compiler; a 7.1 binary is built on a 7.2 host against a 7.1 sysroot with a
++   static libc++, see `docs/aix/howto/build-for-older-aix.md`.
 +
 +   Data sources are libperfstat (CPU, memory, disks, network), `mntctl(2)`/`statvfs(2)` (file systems)
 +   and `getprocs64(3)` (processes). Physical volumes (`hdiskN`) appear in the disks box next to the
@@ -284,7 +321,7 @@ index 9b0c293..5194f5a 100644
 +   **Requirements**
 +
 +   * `openxlCcmp.17.1.3` (or newer) from IBM
-+   * `cmake` >= 3.25 and `ninja-build` (or GNU `make`) from the AIX Toolbox
++   * `cmake` >= 3.25 (C++26 build tested with 4.2.0) and `ninja-build` (or GNU `make`) from the AIX Toolbox
 +
 +   **With CMake (preset `aix-openxl`)**
 +
@@ -312,8 +349,8 @@ index 9b0c293..5194f5a 100644
 +   * The terminal must speak UTF-8. Without a UTF-8 locale on the host (`bos.loc.utf.EN_US` is rarely
 +     installed) start btop with `LANG=en_US.UTF-8` in the environment or with `--force-utf`; btop then
 +     logs a warning and continues.
-+   * `--sysroot`, Open XL and the AIX linker: see `docs/aix-port.md` for the 7.1 build and the list of
-+     AIX specific pitfalls met while porting.
++   * AIX specific pitfalls met while porting: `docs/aix/reference/porting-pitfalls.md`. Index of the AIX
++     documents: `docs/aix/README.md`.
 +
  ## Installing the snap
  [![btop](https://snapcraft.io/btop/badge.svg)](https://snapcraft.io/btop)
@@ -351,7 +388,7 @@ index 0000000..0b55906
 +set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
 diff --git a/cmake/Toolchain-aix-sysroot-openxl.cmake b/cmake/Toolchain-aix-sysroot-openxl.cmake
 new file mode 100644
-index 0000000..0e502cd
+index 0000000..80aa18a
 --- /dev/null
 +++ b/cmake/Toolchain-aix-sysroot-openxl.cmake
 @@ -0,0 +1,38 @@
@@ -362,7 +399,7 @@ index 0000000..0e502cd
 +# The compiler is pointed at a sysroot made from an installation of the target release and
 +# at a libc++/libc++abi/libunwind built statically against that sysroot
 +# (tools/aix/sysroot71/make_sysroot.pl, make_cxxwrap.pl, build_rt.pl).
-+# Background and measurements: docs/aix-port.md, section 5 (7.1) and 7 (6.1).
++# Background: docs/aix/explanation/older-aix-releases.md; steps: docs/aix/howto/build-for-older-aix.md.
 +#
 +# Cache variables (set by the presets aix71-openxl / aix61-openxl, override with -D):
 +#   BTOP_AIX_SYSROOT      root of the target sysroot (usr/include, usr/lib, usr/ccs/lib, cxxwrap)
@@ -393,3 +430,320 @@ index 0000000..0e502cd
 +  "-m64 --sysroot=${BTOP_AIX_SYSROOT} -L${BTOP_AIX_RUNTIME}/lib -L${BTOP_AIX_SYSROOT}/usr/lib -nostdlib++ ${BTOP_AIX_RUNTIME}/lib/libc++.a ${BTOP_AIX_RUNTIME}/lib/libc++abi.a ${BTOP_AIX_RUNTIME}/lib/libunwind.a")
 +
 +set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+diff --git a/docs/aix/README.md b/docs/aix/README.md
+new file mode 100644
+index 0000000..e0852fc
+--- /dev/null
++++ b/docs/aix/README.md
+@@ -0,0 +1,11 @@
++# btop on AIX: documents
++
++| Task or question | Document | Type |
++|---|---|---|
++| Build btop for AIX 7.2 and 7.3 | README of the repository, section "Compilation AIX" | How-to |
++| Build btop for AIX 7.1 and 6.1 on a 7.2 host | [howto/build-for-older-aix.md](howto/build-for-older-aix.md) | How-to |
++| Why a 7.1 or 6.1 binary needs a sysroot and its own libc++ | [explanation/older-aix-releases.md](explanation/older-aix-releases.md) | Explanation |
++| Which AIX pitfalls the port met, and how the code answers them | [reference/porting-pitfalls.md](reference/porting-pitfalls.md) | Reference |
++| Core API, Lua binding and MCP adapter | `docs/btop_core.md`, `docs/btop_lua.md`, `docs/btop_mcp.md` | Explanation |
++| Functions of the Lua module `btop` | `docs/lua-api.md` | Reference |
++| Tools of `btop --mcp-stdio` | `docs/mcp.md` (generated from `mcp/tools.lua`) | Reference |
+diff --git a/docs/aix/explanation/older-aix-releases.md b/docs/aix/explanation/older-aix-releases.md
+new file mode 100644
+index 0000000..b8e677b
+--- /dev/null
++++ b/docs/aix/explanation/older-aix-releases.md
+@@ -0,0 +1,89 @@
++# Why btop for AIX 7.1 and 6.1 needs a sysroot and its own libc++
++
++Applies to: presets `aix71-openxl` and `aix61-openxl`, IBM Open XL C/C++ 17.1.3, LLVM 19.1.7    Revision: 1
++
++IBM Open XL C/C++ runs on AIX 7.2 TL5 and 7.3 only. The build of a binary for AIX 7.1 or 6.1 therefore runs on a
++7.2 host. This document explains why such a binary needs a sysroot of the target release and a static libc++ that
++is built against this sysroot. The steps are in
++[Build btop for AIX 7.1 and 6.1](../howto/build-for-older-aix.md).
++
++## A 7.2 binary fails on 7.1 as soon as libc++ is involved
++
++IBM guarantees binary compatibility only from an older release to a newer one. A binary from a 7.2 host runs on
++7.1 only as long as no statically initialised mutex is involved. With libc++ that is the case at once.
++Five probes showed this on 2026-10-12 on AIX 7100-05-03:
++
++| Probe | Result on 7100-05-03 |
++|---|---|
++| perfstat calls with the structure sizes of 7.2 | runs, all calls return 1 |
++| C++ program with the IBM libc++ 17.1.3, given by `LIBPATH` | the loader stops: `Symbol strftime_l … is not exported from libc.a[shr_64.o]` |
++| the same program with a preloaded `strftime_l` shim (`tools/aix/shim/`) | loads, then aborts: `libc++abi: __cxa_guard_acquire failed to acquire mutex` |
++| C program with 7.2 headers | `pthread_mutex_lock` on a `PTHREAD_MUTEX_INITIALIZER` mutex returns EINVAL |
++| the same C program, built against a 7.1 sysroot | all calls return 0 |
++
++There are two causes:
++
++- In 64-bit mode `PTHREAD_MUTEX_INITIALIZER` is `{{0,0,0,0,2,0}}` on 7.1 and `{{0,2,0}}` on 7.2. The field
++  layout differs, so the libpthreads of 7.1 rejects the initializer of 7.2. Threads and `pthread_once` work. Mutexes also
++  work if the program initialises them at runtime.
++- The libc of 7.1 has no `strftime_l`.
++
++## A sysroot provides the headers of the target release
++
++The compiler reads the headers and start files from a copy of the target system (sysroot). Every initializer and
++every structure then has the layout of the target release. The sysroot of 7.1 needs three corrections, which
++`tools/aix/sysroot71/make_sysroot.pl` makes:
++
++- The 7.1 `crti_64.o` needs `_cdtors` and symbols of libC, which the 7.2 linker does not provide. The 7.2
++  `crti_64.o` needs only `atexit`, `exit` and `__run_*_ctors`. The sysroot therefore contains the 7.2 file.
++- `math.h` gets the guard `__LIBC_NO_CPP_MATH_OVERLOADS__` around its C++ overloads, as in 7.2. libc++ defines
++  these functions itself; without the guard the compiler reports "'abs' is missing exception specification".
++- Absolute symbolic links become relative. Otherwise they point to the files of the build host.
++
++The C headers of 7.1 have no `extern "C"` brackets. Without them, `isdigit`, `catopen` and `socket` get C++
++linkage, and the link fails with `_Z7isdigiti undefined`. `make_cxxwrap.pl` creates one wrapper per header.
++
++The driver of Open XL applies `--sysroot` to headers and `crt0`, but not to `-l` options. The toolchain file
++`cmake/Toolchain-aix-sysroot-openxl.cmake` therefore adds `-L<sysroot>/usr/lib` itself.
++
++## A static libc++ avoids the IBM runtime
++
++The IBM libc++ runtime is built for 7.2. btop therefore links its own libc++, libc++abi and libunwind from LLVM
++19.1.7, built statically against the sysroot (`build_rt.pl`). The resulting binary imports only `libc.a`,
++`libpthreads.a` and `libperfstat.a`. On 2026-10-12 the 7.1 binary imported 218 symbols. `tools/aix/check_imports.pl` showed that the libc of 7100-05-03
++exports all of them.
++
++LLVM 19.1.7 needs two source patches and one CMake option:
++
++| Change | Reason |
++|---|---|
++| `llvm-19.1.7-aix-cmake-quote.patch` | `if(${CMAKE_SYSTEM_NAME} MATCHES "AIX")` is unquoted. On AIX, `AIX` is itself a CMake variable with the value 1, so the comparison fails, and libunwind misses `Unwind_AIXExtras.cpp`. |
++| `llvm-19.1.7-aix-cxa-thread-atexit.patch` | libc++abi references `__cxa_thread_atexit_impl` as a weak symbol. XCOFF has no weak undefined symbols, and the libc of 7.1 lacks the function. The patch makes libc++abi use its own implementation. |
++| `LIBCXXABI_HAS_CXA_THREAD_ATEXIT_IMPL=OFF` | The configure test finds the symbol in the libc of the 7.2 build host. |
++
++The compatibility header `aix71_compat.h` adds `strftime_l` as a `static inline` function, so the binary does
++not import it. It also declares `abort`, `exit` and `_Exit` as `noreturn`, because the 7.1 `stdlib.h` does not.
++Open XL defines `_AIX72` after the build host and not after the sysroot. The header therefore must not depend on
++that macro.
++
++## AIX 6.1 needs four more answers
++
++Against the libc exports of 6100-09-04, 34 of these 218 imports of the 7.1 binary are missing. The 6.1 build uses
++the same sysroot method with these additions:
++
++| Finding | Answer |
++|---|---|
++| The POSIX 2008 locale API is missing: `locale_t`, `newlocale`, `uselocale`, `freelocale` and 24 `*_l` functions. libc++ 19 requires them on AIX. | `aix61_compat.h` provides one global locale. `newlocale` returns a placeholder and never NULL, because `locale_byname` would throw. Each `*_l` function calls the function without locale. `std::locale("de_DE")` therefore creates no separate locale; btop needs only "C". |
++| `openat`, `fdopendir` and `unlinkat` are missing; libc++ `<filesystem>` uses them. | libc++ is built with `-DREMOVE_ALL_USE_DIRECTORY_ITERATOR`, a code path without `openat`. |
++| `___strlen64` and `___strcmp64` are missing. Open XL replaces `strlen` and `strcmp` in 64-bit objects with these libc routines. | The preset `aix61-openxl` passes `-fno-builtin-strlen -fno-builtin-strcmp -fno-builtin-strcpy`. `build_rt.pl` gets `-fno-builtin-strlen -fno-builtin-strcmp` through `--extra-flags`. |
++| `<fcntl.h>` lacks `O_CLOEXEC`. | The compatibility header defines it as 0. btop starts no child processes. |
++
++## Where the method ends
++
++`quick_exit` exists in the libc only from 6.1 TL9 and 7.1 TL3 on. btop therefore calls `_Exit` on AIX; it
++registers no `at_quick_exit` handlers. With this change the 7.1 and the 6.1 binary also load and run on 7100-02-01 (measured once each).
++
++## Related
++
++- [Build btop for AIX 7.1 and 6.1](../howto/build-for-older-aix.md)
++- [AIX porting pitfalls](../reference/porting-pitfalls.md)
+diff --git a/docs/aix/howto/build-for-older-aix.md b/docs/aix/howto/build-for-older-aix.md
+new file mode 100644
+index 0000000..66ef813
+--- /dev/null
++++ b/docs/aix/howto/build-for-older-aix.md
+@@ -0,0 +1,133 @@
++# Build btop for AIX 7.1 and 6.1
++
++Applies to: presets `aix71-openxl` and `aix61-openxl`, IBM Open XL C/C++ 17.1.3, LLVM 19.1.7
++Verified: one-time setup on 2026-10-12; preset build in every CI run of btop-aix    Revision: 1
++
++## Goal
++
++At the end, `build/aix71-openxl/btop` (or `build/aix61-openxl/btop`) exists. The binary imports only `libc.a`,
++`libpthreads.a` and `libperfstat.a` and runs on AIX 7.1 (or 6.1). The reasons for each step are in
++[Why btop for AIX 7.1 and 6.1 needs a sysroot](../explanation/older-aix-releases.md).
++
++## Prerequisites
++
++- A build host with AIX 7.2 TL5 or 7.3 and IBM Open XL C/C++ 17.1.3 in `/opt/IBM/openxlC/17.1.3`.
++- `cmake` >= 3.25 (the C++26 build was tested with 4.2.0), `ninja-build` or GNU `make`, `perl` and `patch`.
++- A host with the target release (7.1 or 6.1). An ordinary user account is enough.
++- The LLVM 19.1.7 sources `llvm-project-19.1.7.src.tar.xz` from the LLVM releases on GitHub, sha256
++  `82401fea7b79d0078043f7598b835284d6650a75b93e64b6f761ea7b63097501`.
++- A directory `/build/btop-aix` on the build host, which the presets expect. For another directory, pass `-DBTOP_AIX_SYSROOT=…`, `-DBTOP_AIX_RUNTIME=…` and `-DBTOP_AIX_COMPAT=…` to `cmake`.
++
++The steps use AIX 7.1 and the suffix `71`. For AIX 6.1, use `61` and the additional flags in step 4.
++
++## Steps
++
++### 1. Pack the sysroot on the target host
++
++The tar file must contain `usr/include`, `usr/ccs/lib`, all `usr/lib/*.o`, `*.exp` and `*.imp`, and the
++libraries that btop links from `usr/lib` (`libc.a`, `libpthreads.a`, `libperfstat.a` and their links).
++`libC.a` from the fileset `xlC.aix61.rte` goes into a second tar file. Pack symbolic links as links: do not use
++`tar -h`.
++
++untested: the command below was not run in exactly this form.
++
++```sh
++cd / && tar -cf - usr/include usr/ccs/lib usr/lib/*.o usr/lib/*.exp usr/lib/*.imp \
++    usr/lib/libc.a usr/lib/libpthreads.a usr/lib/libperfstat.a | gzip > $HOME/sysroot71.tar.gz
++```
++
++Copy the tar files to `/build/btop-aix/` on the build host.
++
++Success: `gzip -dc sysroot71.tar.gz | tar -tf - | grep pthread.h` lists `usr/include/pthread.h`.
++
++### 2. Create the sysroot on the build host
++
++```sh
++cd <BTOP_SOURCE>/tools/aix/sysroot71
++perl make_sysroot.pl --root /build/btop-aix/sysroot71 --tag aix71 \
++     --tar /build/btop-aix/sysroot71.tar.gz --tar /build/btop-aix/sysroot71-libC.tar.gz
++perl make_cxxwrap.pl --sysroot /build/btop-aix/sysroot71
++cp aix71_compat.h /build/btop-aix/aix71_compat.h
++```
++
++For 6.1, pass only the one tar file and use `aix61_compat.h`.
++
++Success: `/build/btop-aix/sysroot71/usr/include/pthread.h` and `/build/btop-aix/sysroot71/cxxwrap/ctype.h`
++exist.
++
++### 3. Patch the LLVM sources
++
++```sh
++cd /build/btop-aix
++xz -dc llvm-project-19.1.7.src.tar.xz | tar -xf -
++cd llvm-project-19.1.7.src
++patch -p0 < <BTOP_SOURCE>/tools/aix/sysroot71/llvm-19.1.7-aix-cmake-quote.patch
++patch -p0 < <BTOP_SOURCE>/tools/aix/sysroot71/llvm-19.1.7-aix-cxa-thread-atexit.patch
++```
++
++Success: `patch` reports no rejected hunks.
++
++### 4. Build the static libc++
++
++```sh
++perl <BTOP_SOURCE>/tools/aix/sysroot71/build_rt.pl --src /build/btop-aix/llvm-project-19.1.7.src \
++     --sysroot /build/btop-aix/sysroot71 --prefix /build/btop-aix/rt71 \
++     --build /build/btop-aix/build-rt71 --compat /build/btop-aix/aix71_compat.h
++```
++
++For 6.1, add:
++
++```sh
++     --extra-flags "-fno-builtin-strlen -fno-builtin-strcmp -DREMOVE_ALL_USE_DIRECTORY_ITERATOR"
++```
++
++Success: `/build/btop-aix/rt71/lib/libc++.a` exists.
++
++### 5. Build btop
++
++```sh
++export PATH=/opt/freeware/bin:$PATH OBJECT_MODE=64
++cd <BTOP_SOURCE>
++cmake --preset aix71-openxl
++cmake --build --preset aix71-openxl -j 8
++```
++
++Success: `build/aix71-openxl/btop --version` prints the version and the commit ID.
++
++## Verify
++
++The check compares the imports of the binary with the exports of the target host. The CI of btop-aix runs the
++import list and the comparison after each build, with export lists of 7100-05-03 and 6100-09-04.
++
++On the target host, create the export list. untested: this exact command was not run; the head of
++`tools/aix/check_imports.pl` describes the form.
++
++```sh
++dump -X64 -Tv /usr/lib/libc.a /usr/lib/libpthreads.a /usr/lib/libperfstat.a \
++     | awk '$4=="EXP"{print $NF}' | sort -u > libc_exports_<LEVEL>.txt
++```
++
++On the build host, create the import list and compare:
++
++```sh
++dump -X64 -Tv build/aix71-openxl/btop | awk '$4=="IMP"{print $NF}' | sort -u > imports-aix71.txt
++perl tools/aix/check_imports.pl --imports imports-aix71.txt --exports libc_exports_<LEVEL>.txt
++```
++
++The check passes with exit code 0, which means that no symbol is missing. On the target host, start the binary
++with `TERM=xterm-256color` and either `LANG=en_US.UTF-8` or `--force-utf`.
++
++## If it fails
++
++| Message | Cause | Fix |
++|---|---|---|
++| `_Z7isdigiti undefined` | the C++ wrappers of the C headers are missing | run `make_cxxwrap.pl` again (step 2) |
++| `'abs' is missing exception specification` | `math.h` in the sysroot lacks the guard | run `make_sysroot.pl` again on fresh tar files (step 2) |
++| `getFuncNameFromTBTable` undefined while linking | LLVM sources without the CMake patch | apply the patches (step 3) and rebuild the runtime (step 4) |
++| on the target host: `Symbol quick_exit … is not exported` | binary from a btop source older than commit `ab9e608` | build from a current source |
++
++## Related
++
++- [Why btop for AIX 7.1 and 6.1 needs a sysroot](../explanation/older-aix-releases.md)
++- [AIX porting pitfalls](../reference/porting-pitfalls.md)
++- `cmake/Toolchain-aix-sysroot-openxl.cmake` (cache variables of the presets)
+diff --git a/docs/aix/reference/porting-pitfalls.md b/docs/aix/reference/porting-pitfalls.md
+new file mode 100644
+index 0000000..e88e02c
+--- /dev/null
++++ b/docs/aix/reference/porting-pitfalls.md
+@@ -0,0 +1,60 @@
++# AIX porting pitfalls
++
++Applies to: btop-aix with IBM Open XL C/C++ 17.1.3, AIX 6.1 to 7.3    Revision: 1
++
++The tables list the AIX pitfalls that the port of btop met, with the effect and the answer in the code. All
++entries were observed while porting. For the build for 7.1 and 6.1, see
++[Why btop for AIX 7.1 and 6.1 needs a sysroot](../explanation/older-aix-releases.md).
++
++## Compiler and headers
++
++| Pitfall | Effect | Answer |
++|---|---|---|
++| no `<ifaddrs.h>` and no `getifaddrs` in the libc | build stops in `btop_shared.hpp` | `src/aix/aix_ifaddrs.*` |
++| no `pthread_timedjoin_np` | link error | `pthread_join`, as on macOS and BSD |
++| no `getloadavg` | no load average | `perfstat_cpu_total_t::loadavg` |
++| the macros `hz`, `SACTIVE`, `SBITS` and `SKPROC` from `<sys/m_param.h>` and `<sys/proc.h>` (through `<procinfo.h>`) | "expected unqualified-id" | renamed identifiers (`clock_str`, `AixProc::STATE_*`) |
++| `-std=c++23` sets `__STRICT_ANSI__`; the AIX headers then hide `sa_len`, `SIOCGIFCONF` and `getprocs64` | compile errors | `-D_ALL_SOURCE`, which the C++26 build keeps |
++| without `-m64` or `OBJECT_MODE=64`, Open XL builds 32-bit objects | wrong structure sizes | the toolchain file sets `-m64`; the presets set `OBJECT_MODE=64` |
++| Open XL accepts `-fstack-clash-protection` but ignores it | one warning per file | the flag is not set on AIX |
++| `quick_exit` exists in the libc only from 6.1 TL9 and 7.1 TL3 on | the loader stops: `Symbol quick_exit … is not exported` | `_Exit` on AIX; btop registers no `at_quick_exit` handlers |
++
++## Libraries and kernel interfaces
++
++| Pitfall | Effect | Answer |
++|---|---|---|
++| libperfstat rejects a `sizeof_struct` that is larger than the structure of the installed library (EINVAL). A binary built against the 7100-05 sysroot passes 640 bytes for `perfstat_cpu_t`, and libperfstat 7.1.2 (7100-02-01) accepts 616. Built against the 6100-09 headers, `perfstat_cpu_t` has 624 bytes, and the library of 6100-07 accepts 616. | the CPU box stays empty; `btop.log` reports `perfstat_cpu() failed: Invalid argument` | `AixPerfstat::Array<T>` probes the accepted size once, in steps of 8 bytes down to half the size. It then copies the entries with this stride from a raw buffer. This applies to `perfstat_cpu`, `perfstat_disk`, `perfstat_netinterface` and `perfstat_logicalvolume`. |
++| `procentry64.pi_ru.ru_utime.tv_usec` and `ru_stime.tv_usec` hold nanoseconds, not microseconds | single-threaded loops showed 1035 % and 3200 % CPU on a host with 32 CPUs | btop divides by 1e9 |
++
++The sizes do not only grow: `perfstat_netinterface_t` has 240 bytes in 6.1.8 and 224 in 7.1.0 and 7.1.1.
++The probing is still enough, because every field that btop reads has the same offset in all versions and ends
++within the smallest structure size. The one exception is `real_avail`, which exists from 6.1.7 on. Fields
++beyond the accepted size read as zero. The file `tools/aix/probes/perfstat_layout/offsets_5.3-7.3.txt` lists
++the offsets in the headers of 5.3.9.7, 6.1.2.8, 6.1.7.0, 6.1.8.0, 7.1.0.1, 7.1.1.1, 7.2.5.201 and 7.3.1.0.
++
++The structures have these sizes in bytes, depending on the version:
++
++| Structure | Sizes |
++|---|---|
++| `perfstat_cpu_t` | 528, 616, 624, 640 |
++| `perfstat_netinterface_t` | 208, 224, 240 |
++| `perfstat_cpu_total_t` | 624, 696 |
++| `perfstat_memory_total_t` | 208, 352 |
++| `perfstat_disk_t` | 472, 496 |
++| `perfstat_logicalvolume_t` | 216, 224 |
++
++The probes are `tools/aix/probes/perfstat_size_probe.c` (accepted sizes) and `tools/aix/probes/rusage_probe.c`
++(unit of `tv_usec`). Both ran on 2026-10-12.
++
++## Shell and tools on AIX
++
++| Pitfall | Effect | Answer |
++|---|---|---|
++| AIX `find` has no `-maxdepth`; AIX `grep` has no `-o`, no `\|` and no `-A` | empty source lists and silently wrong results in scripts | `$(wildcard)` in the Makefile; `egrep` or `perl` in scripts |
++| a background job in ksh gets `/dev/null` as stdin | btop prints "No tty detected!" | `./btop </dev/tty &` for recordings |
++| the host often has no UTF-8 locale (`bos.loc.utf.EN_US` is rarely installed) | btop stops with "No UTF-8 locale detected!" | `LANG=en_US.UTF-8` (btop checks only the name) or `--force-utf` |
++
++## Related
++
++- [Build btop for AIX 7.1 and 6.1](../howto/build-for-older-aix.md)
++- [Why btop for AIX 7.1 and 6.1 needs a sysroot](../explanation/older-aix-releases.md)
