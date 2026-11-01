@@ -1,6 +1,6 @@
-From 3c71fac9b0770bcc8ffcd8ca54dd3c4a3bb0b03f Mon Sep 17 00:00:00 2001
+From dda8559a89e41f2a23d0370a69a88ca9c650bcef Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Sun, 1 Nov 2026 08:24:23 +0100
+Date: Sun, 1 Nov 2026 13:30:58 +0100
 Subject: [PATCH 3/5] [AI generated] AIX 7.1/6.1 targets: sysroot tooling,
  static libc++ 19 build, LLVM patches, compat headers
 

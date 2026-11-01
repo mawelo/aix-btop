@@ -1,6 +1,6 @@
-From e2007214d0c1ef5c41ae57f2d39f07629eed0e8f Mon Sep 17 00:00:00 2001
+From 1d1c4472d425a4f097e8bb14279bad91d16b4727 Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Sun, 1 Nov 2026 08:24:23 +0100
+Date: Sun, 1 Nov 2026 13:30:58 +0100
 Subject: [PATCH 2/5] [AI generated] AIX: build system (CMake, presets, IBM
  Open XL toolchain files, Makefile), README section
 
@@ -12,6 +12,10 @@ Subject: [PATCH 2/5] [AI generated] AIX: build system (CMake, presets, IBM
   against a sysroot of the target release with a static libc++ 19, see
   tools/aix/sysroot71).
 * cmake/Toolchain-aix-openxl.cmake and cmake/Toolchain-aix-sysroot-openxl.cmake.
+  Both set the library search path of the binary to /usr/lib:/lib. Otherwise
+  CMake writes directories of the build host into the loader section (for the
+  sysroot builds the sysroot and runtime directories), and the loader on the
+  target host searches them first.
 * Makefile: platform aix (gmake, no LTO), sources via $(wildcard) because AIX
   find has no -maxdepth.
 * README.md: section "Compilation AIX".
@@ -22,13 +26,13 @@ Subject: [PATCH 2/5] [AI generated] AIX: build system (CMake, presets, IBM
  CMakePresets.json                          |  96 +++++++++++++++
  Makefile                                   |  20 +++-
  README.md                                  |  47 +++++++-
- cmake/Toolchain-aix-openxl.cmake           |  25 ++++
- cmake/Toolchain-aix-sysroot-openxl.cmake   |  38 ++++++
+ cmake/Toolchain-aix-openxl.cmake           |  31 +++++
+ cmake/Toolchain-aix-sysroot-openxl.cmake   |  47 ++++++++
  docs/aix/README.md                         |  11 ++
  docs/aix/explanation/older-aix-releases.md |  89 ++++++++++++++
  docs/aix/howto/build-for-older-aix.md      | 133 +++++++++++++++++++++
  docs/aix/reference/porting-pitfalls.md     |  60 ++++++++++
- 10 files changed, 544 insertions(+), 8 deletions(-)
+ 10 files changed, 559 insertions(+), 8 deletions(-)
  create mode 100644 CMakePresets.json
  create mode 100644 cmake/Toolchain-aix-openxl.cmake
  create mode 100644 cmake/Toolchain-aix-sysroot-openxl.cmake
@@ -357,10 +361,10 @@ index 9b0c293..3e01e33 100644
  
 diff --git a/cmake/Toolchain-aix-openxl.cmake b/cmake/Toolchain-aix-openxl.cmake
 new file mode 100644
-index 0000000..0b55906
+index 0000000..e905d82
 --- /dev/null
 +++ b/cmake/Toolchain-aix-openxl.cmake
-@@ -0,0 +1,25 @@
+@@ -0,0 +1,31 @@
 +# SPDX-License-Identifier: Apache-2.0
 +#
 +# Toolchain file for building btop on AIX 7.2 TL5+ / 7.3 with IBM Open XL C/C++
@@ -386,12 +390,18 @@ index 0000000..0b55906
 +
 +# AIX shared libraries live inside .a archives; never pick up stray .so files
 +set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
++
++# Library search path of the binary: only /usr/lib:/lib (CMake would put a library directory of the compiler on the
++# build host first). The IBM C++ runtime that this build imports (libc++.a, libc++abi.a, libunwind.a) is linked into /usr/lib.
++# The last -blibpath counts, and CMAKE_<LANG>_STANDARD_LIBRARIES comes last on the link line.
++set(CMAKE_C_STANDARD_LIBRARIES_INIT   "-Wl,-blibpath:/usr/lib:/lib")
++set(CMAKE_CXX_STANDARD_LIBRARIES_INIT "-Wl,-blibpath:/usr/lib:/lib")
 diff --git a/cmake/Toolchain-aix-sysroot-openxl.cmake b/cmake/Toolchain-aix-sysroot-openxl.cmake
 new file mode 100644
-index 0000000..80aa18a
+index 0000000..cf7fe03
 --- /dev/null
 +++ b/cmake/Toolchain-aix-sysroot-openxl.cmake
-@@ -0,0 +1,38 @@
+@@ -0,0 +1,47 @@
 +# SPDX-License-Identifier: Apache-2.0
 +#
 +# Toolchain file for building a btop binary that runs on an AIX release older than the
@@ -430,6 +440,15 @@ index 0000000..80aa18a
 +  "-m64 --sysroot=${BTOP_AIX_SYSROOT} -L${BTOP_AIX_RUNTIME}/lib -L${BTOP_AIX_SYSROOT}/usr/lib -nostdlib++ ${BTOP_AIX_RUNTIME}/lib/libc++.a ${BTOP_AIX_RUNTIME}/lib/libc++abi.a ${BTOP_AIX_RUNTIME}/lib/libunwind.a")
 +
 +set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
++
++# Library search path of the binary (XCOFF loader section): only the target's system directories. CMake writes
++# its own -blibpath from the -L directories above, i.e. the sysroot and runtime directories of the BUILD host; the
++# loader on the target would search them first. With several -blibpath options the
++# last one counts, and CMAKE_<LANG>_STANDARD_LIBRARIES comes last on the link line. CMAKE_SKIP_RPATH does not
++# remove CMake's -blibpath on AIX. Do not set CMAKE_EXE_LINKER_FLAGS on the command line: it replaces the
++# *_INIT flags above, and the binary then links the IBM C++ runtime of the build host.
++set(CMAKE_C_STANDARD_LIBRARIES_INIT   "-Wl,-blibpath:/usr/lib:/lib")
++set(CMAKE_CXX_STANDARD_LIBRARIES_INIT "-Wl,-blibpath:/usr/lib:/lib")
 diff --git a/docs/aix/README.md b/docs/aix/README.md
 new file mode 100644
 index 0000000..e0852fc

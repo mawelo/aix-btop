@@ -20,7 +20,7 @@ tar archive as root, or the tar archive without root in any directory.
 - Download from the [latest release](https://github.com/mawelo/aix-btop/releases/latest):
   `btop-<VERSION>-<RELEASE>.aix6.1.ppc.rpm` or `.tar.gz`, `SHA256SUMS`, `SHA256SUMS.asc` and `KEYS`.
 
-The examples use `btop-1.4.8-2`. Replace it with the name of the downloaded file.
+The examples use `btop-1.4.8-3`. Replace it with the name of the downloaded file.
 
 ## Steps
 
@@ -35,7 +35,7 @@ On AIX with `rpm.rte` 4.15 or newer (tested on 2026-10-13: 4.15.1 on 7200-05, 4.
 
 ```sh
 rpm --import KEYS
-rpm -K btop-1.4.8-2.aix6.1.ppc.rpm
+rpm -K btop-1.4.8-3.aix6.1.ppc.rpm
 ```
 
 Success: `rpm -K` prints `digests signatures OK`.
@@ -53,7 +53,7 @@ Success: `gpg` reports a good signature, and `sha256sum` prints `OK` for each fi
 ### 2a. Install the RPM
 
 ```sh
-rpm -ivh btop-1.4.8-2.aix6.1.ppc.rpm
+rpm -ivh btop-1.4.8-3.aix6.1.ppc.rpm
 btop          # /usr/bin/btop -> /opt/btop/bin/btop -> /opt/btop/bin/btop.bin
 ```
 
@@ -65,7 +65,7 @@ branch of the fork.
 The archive contains only `opt/btop`.
 
 ```sh
-cd / && gzip -dc btop-1.4.8-2.aix6.1.ppc.tar.gz | tar -xf -
+cd / && gzip -dc btop-1.4.8-3.aix6.1.ppc.tar.gz | tar -xf -
 ln -s /opt/btop/bin/btop /usr/bin/btop   # optional
 ```
 
@@ -74,7 +74,7 @@ Success: `/opt/btop/bin/btop --version` prints the version.
 ### 2c. Install the tar archive without root
 
 ```sh
-mkdir ~/btop && cd ~/btop && gzip -dc /path/to/btop-1.4.8-2.aix6.1.ppc.tar.gz | tar -xf -
+mkdir ~/btop && cd ~/btop && gzip -dc /path/to/btop-1.4.8-3.aix6.1.ppc.tar.gz | tar -xf -
 ~/btop/opt/btop/bin/btop
 ```
 

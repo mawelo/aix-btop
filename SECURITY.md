@@ -13,8 +13,8 @@ Only the latest release receives fixes.
 
 | Release | Status |
 |---|---|
-| `v1.4.8-aix2` | supported |
-| `v1.4.8-aix1` | superseded by `v1.4.8-aix2`; no known security problem |
+| `v1.4.8-aix3` | supported |
+| `v1.4.8-aix1`, `v1.4.8-aix2` | superseded: the search path for libraries contains directories that do not belong there (see "Library search path"; fixed in `v1.4.8-aix3`) |
 | `v1.4.7-aix4` | superseded: invalid UTF-8 in process names passed unchanged (matters only on a terminal in 8-bit mode); on AIX 6.1 and 7.1 the main loop spun for up to one second per update cycle (both fixed in `v1.4.8-aix1`) |
 | `v1.4.7-aix3` | superseded: control characters in process names reached the terminal of the user running btop (fixed in `v1.4.7-aix4`) |
 | `v1.4.7-aix1`, `v1.4.7-aix2` | withdrawn: the themes were group-writable (`v1.4.7-aix1` tar: also owned by uid/gid 1000); control characters as in `v1.4.7-aix3` |
@@ -36,6 +36,15 @@ btop writes UTF-8, and the launcher `/opt/btop/bin/btop` adds `--force-utf` when
 by `?`. Since `v1.4.8-aix1`, invalid UTF-8 is replaced by `?` as well, so a lone byte 0x9B or 0x9D no longer reaches
 a terminal in 8-bit mode (for example Latin-1), where it would read as CSI or OSC. Up to `v1.4.7-aix4` such bytes
 passed unchanged. Use a UTF-8 terminal, which btop needs anyway.
+
+## Library search path
+
+The binary of the releases `v1.4.7-aix1` to `v1.4.8-aix2` has a search path for libraries. This search path contains
+directories that do not belong there. The AIX loader searches them before `/usr/lib` for `libc.a`, `libpthreads.a` and `libperfstat.a`.
+Since `v1.4.8-aix3`, the search path is `/usr/lib:/lib`.
+
+Upgrade with `rpm -Uvh` (or unpack the tar archive of the latest release). `dump -X64 -H /opt/btop/bin/btop.bin`
+shows the search path as path 0 under "Import File Strings"; after the upgrade it is `/usr/lib:/lib`.
 
 ## Upstream status
 

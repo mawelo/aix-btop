@@ -1,6 +1,6 @@
-From 7a0fde6ca39926f9ecbd95ea38a0381afc85c969 Mon Sep 17 00:00:00 2001
+From 612ab7e5acf025c8e29b1ec787bc6f2e18cebf55 Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Sun, 1 Nov 2026 08:24:23 +0100
+Date: Sun, 1 Nov 2026 13:30:58 +0100
 Subject: [PATCH 4/5] [AI generated] AIX: RPM packaging (spec, launcher),
  probes and check tools
 

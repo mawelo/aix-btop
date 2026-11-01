@@ -1,15 +1,15 @@
 # Packages
 
 The packages are not stored in this directory. They are attached to the GitHub release
-[v1.4.8-aix2](https://github.com/mawelo/aix-btop/releases/tag/v1.4.8-aix2) (all releases: [Releases](https://github.com/mawelo/aix-btop/releases)).
+[v1.4.8-aix3](https://github.com/mawelo/aix-btop/releases/tag/v1.4.8-aix3) (all releases: [Releases](https://github.com/mawelo/aix-btop/releases)).
 
 Direct downloads of the current release:
 
-- [`btop-1.4.8-2.aix6.1.ppc.rpm`](https://github.com/mawelo/aix-btop/releases/download/v1.4.8-aix2/btop-1.4.8-2.aix6.1.ppc.rpm)
-- [`btop-1.4.8-2.aix6.1.ppc.tar.gz`](https://github.com/mawelo/aix-btop/releases/download/v1.4.8-aix2/btop-1.4.8-2.aix6.1.ppc.tar.gz)
-- [`KEYS`](https://github.com/mawelo/aix-btop/releases/download/v1.4.8-aix2/KEYS)
-- [`SHA256SUMS`](https://github.com/mawelo/aix-btop/releases/download/v1.4.8-aix2/SHA256SUMS)
-- [`SHA256SUMS.asc`](https://github.com/mawelo/aix-btop/releases/download/v1.4.8-aix2/SHA256SUMS.asc)
+- [`btop-1.4.8-3.aix6.1.ppc.rpm`](https://github.com/mawelo/aix-btop/releases/download/v1.4.8-aix3/btop-1.4.8-3.aix6.1.ppc.rpm)
+- [`btop-1.4.8-3.aix6.1.ppc.tar.gz`](https://github.com/mawelo/aix-btop/releases/download/v1.4.8-aix3/btop-1.4.8-3.aix6.1.ppc.tar.gz)
+- [`KEYS`](https://github.com/mawelo/aix-btop/releases/download/v1.4.8-aix3/KEYS)
+- [`SHA256SUMS`](https://github.com/mawelo/aix-btop/releases/download/v1.4.8-aix3/SHA256SUMS)
+- [`SHA256SUMS.asc`](https://github.com/mawelo/aix-btop/releases/download/v1.4.8-aix3/SHA256SUMS.asc)
 
 This directory holds the metadata of that release:
 
