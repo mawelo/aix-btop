@@ -1,6 +1,6 @@
-From 211db1a01fc22e2ae163ea92aebf9d3aaae98cfe Mon Sep 17 00:00:00 2001
+From e245c4da52d3eb4aa93954928ec097fd9dac20c2 Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Sun, 1 Nov 2026 13:30:58 +0100
+Date: Mon, 2 Nov 2026 09:16:47 +0100
 Subject: [PATCH 1/5] [AI generated] AIX: platform layer (perfstat, mntctl,
  getprocs64), getifaddrs replacement, executable path
 

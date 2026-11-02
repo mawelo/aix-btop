@@ -1,6 +1,6 @@
-From 612ab7e5acf025c8e29b1ec787bc6f2e18cebf55 Mon Sep 17 00:00:00 2001
+From 4bfe6bf9e9a98af807f24c23772103423d3cc752 Mon Sep 17 00:00:00 2001
 From: Martin Lonkwitz <mawelo@users.noreply.github.com>
-Date: Sun, 1 Nov 2026 13:30:58 +0100
+Date: Mon, 2 Nov 2026 09:16:47 +0100
 Subject: [PATCH 4/5] [AI generated] AIX: RPM packaging (spec, launcher),
  probes and check tools
 
@@ -8,9 +8,10 @@ Subject: [PATCH 4/5] [AI generated] AIX: RPM packaging (spec, launcher),
   digests and gzip payload so that rpm.rte 4.9 can read the package),
   btop.sh launcher (adds --force-utf when no UTF-8 locale is active, defaults
   TERM to xterm-256color), build_rpm.pl (stages the file tree once, builds RPM
-  and an equivalent tar archive, writes rpm-info.txt), README.AIX,
-  THIRD-PARTY-NOTICES.txt (MIT texts of Lua and nlohmann/json, installed in
-  /opt/btop/share/doc/btop).
+  and an equivalent tar archive, writes rpm-info.txt; strips the shipped
+  binary and stops if directory names of the build host remain in it),
+  README.AIX, THIRD-PARTY-NOTICES.txt (MIT texts of Lua and nlohmann/json,
+  installed in /opt/btop/share/doc/btop).
 * tools/aix/probes: perfstat_sizes.cpp (structure sizes across releases),
   cxxrt_probe.cpp (C++23 runtime smoke test), pthread_probe.c (static mutex
   initializer across releases), libcall_probe.c (___strlen64/___strcmp64),
@@ -43,10 +44,10 @@ Subject: [PATCH 4/5] [AI generated] AIX: RPM packaging (spec, launcher),
  tools/aix/rpm/THIRD-PARTY-NOTICES.txt         |  56 +++
  tools/aix/rpm/btop.sh                         |  32 ++
  tools/aix/rpm/btop.spec                       |  89 +++++
- tools/aix/rpm/build_rpm.pl                    | 107 ++++++
+ tools/aix/rpm/build_rpm.pl                    | 120 +++++++
  tools/aix/shim/strftime_l_shim.c              |  33 ++
  tools/aix/shim/strftime_l_shim.exp            |   1 +
- 24 files changed, 1359 insertions(+)
+ 24 files changed, 1372 insertions(+)
  create mode 100755 tools/aix/ansi_render.pl
  create mode 100755 tools/aix/check_imports.pl
  create mode 100644 tools/aix/probes/cxxrt_probe.cpp
@@ -1418,10 +1419,10 @@ index 0000000..34a95a2
 +- AIX port of btop: perfstat, mntctl, getprocs64; static libc++ built against AIX 6.1, one package for 6.1 TL7 to 7.3
 diff --git a/tools/aix/rpm/build_rpm.pl b/tools/aix/rpm/build_rpm.pl
 new file mode 100644
-index 0000000..e9f67a4
+index 0000000..31545c8
 --- /dev/null
 +++ b/tools/aix/rpm/build_rpm.pl
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,120 @@
 +#!/usr/bin/perl
 +# build_rpm.pl -- project btop-aix (2026-10-12)
 +#
@@ -1438,6 +1439,8 @@ index 0000000..e9f67a4
 +#           level; rpm on 7.1/7.2/7.3 accepts it through its compatibility table (measured 2026-10-12), a bare "aix"
 +#           is rejected ("intended for a different operating system").
 +#           Needs AIX with rpm.rte 4.x (rpmbuild) and the system Perl; no CPAN modules.
++#           The shipped btop.bin is stripped; --forbid TEXT (repeatable, default /build/ and /tmp/) names strings
++#           that must not remain in it, the source directory is always checked (2026-11-01).
 +# Output  : <out>/btop-<ver>-<rel>.<os>.ppc.rpm, <out>/btop-<ver>-<rel>.<os>.ppc.tar.gz,
 +#           <out>/rpm-info.txt (rpm -qpi/-qpl/--requires; no checksum, see below). rc 0 only after a complete run.
 +use strict;
@@ -1448,9 +1451,10 @@ index 0000000..e9f67a4
 +use File::Basename qw(basename);
 +use Cwd qw(abs_path getcwd);
 +
-+my %o = (release => '1', target => 'ppc-ibm-aix6.1', spec => '');
-+GetOptions(\%o, 'binary=s', 'source=s', 'commit=s', 'out=s', 'release=s', 'target=s', 'topdir=s', 'spec=s')
-+    or die "usage: $0 --binary FILE --source DIR --commit ID --out DIR [--release N] [--target TRIPLE] [--topdir DIR]\n";
++my %o = (release => '1', target => 'ppc-ibm-aix6.1', spec => '', forbid => []);
++GetOptions(\%o, 'binary=s', 'source=s', 'commit=s', 'out=s', 'release=s', 'target=s', 'topdir=s', 'spec=s', 'forbid=s@')
++    or die "usage: $0 --binary FILE --source DIR --commit ID --out DIR [--release N] [--target TRIPLE] [--topdir DIR] [--forbid TEXT]...\n";
++$o{forbid} = ['/build/', '/tmp/'] unless @{$o{forbid}};
 +for (qw(binary source commit out)) { die "--$_ missing\n" unless defined $o{$_} && length $o{$_} }
 +die "$o{binary}: not an executable binary\n" unless -f $o{binary} && -x _;
 +die "$o{source}: not a btop source tree (themes/ missing)\n" unless -d "$o{source}/themes";
@@ -1485,6 +1489,16 @@ index 0000000..e9f67a4
 +copy($binary, "$tree/opt/btop/bin/btop.bin") or die "copy binary: $!";
 +copy($launch, "$tree/opt/btop/bin/btop")     or die "copy launcher: $!";
 +chmod 0755, "$tree/opt/btop/bin/btop.bin", "$tree/opt/btop/bin/btop";
++# The symbol table names every object's source file with its absolute path on the build host (C_FILE entries, also
++# assembler temp files under /tmp). The loader does not need it; exceptions and libunwind use the traceback tables
++# in .text. The binary given with --binary keeps its symbols for analysis.
++run('/usr/ccs/bin/strip', '-X64', "$tree/opt/btop/bin/btop.bin");
++{   # acceptance check: no directory name of the build host left in the shipped binary
++    my @deny = (@{$o{forbid}}, $src);
++    my @hits = grep { my $s = $_; grep { index($s, $_) >= 0 } @deny } `strings -a '$tree/opt/btop/bin/btop.bin'`;
++    die "binary contains directory names of the build host (" . scalar(@hits) . "):\n@hits" if @hits;
++    print "binary stripped, no strings with: @deny\n";
++}
 +run('cp', '-Rp', "$src/themes", "$tree/opt/btop/share/btop/themes");
 +# MCP tool registry (btop --mcp-stdio, src/btop_mcp.cpp); the spec lists /opt/btop/share/btop/mcp
 +run('cp', '-Rp', "$src/mcp", "$tree/opt/btop/share/btop/mcp");

@@ -1,8 +1,8 @@
 # Install btop on AIX
 
-Reading time: 3 min
+Reading time: 4 min
 
-Applies to: `v1.4.8-aix1` and later, AIX 6.1 TL7 to 7.3    Verified: 2026-11-01, see [test-matrix.md](test-matrix.md)    Revision: 2
+Applies to: `v1.4.8-aix1` and later, AIX 6.1 TL7 to 7.3    Verified: 2026-11-02, see [test-matrix.md](test-matrix.md)    Revision: 3
 
 ## Goal
 
@@ -20,7 +20,7 @@ tar archive as root, or the tar archive without root in any directory.
 - Download from the [latest release](https://github.com/mawelo/aix-btop/releases/latest):
   `btop-<VERSION>-<RELEASE>.aix6.1.ppc.rpm` or `.tar.gz`, `SHA256SUMS`, `SHA256SUMS.asc` and `KEYS`.
 
-The examples use `btop-1.4.8-3`. Replace it with the name of the downloaded file.
+The examples use `btop-1.4.8-4`. Replace it with the name of the downloaded file.
 
 ## Steps
 
@@ -31,11 +31,11 @@ The signing key is `aix-btop package signing <mawelo@users.noreply.github.com>`,
 `4C28 DC73 FAC1 2125 F8E3 6A04 CF43 58E9 DA7A DDD4`. The public key is in `KEYS`. Compare the fingerprint also
 with the one on the GitHub profile (https://github.com/mawelo.gpg), not only with this file.
 
-On AIX with `rpm.rte` 4.15 or newer (tested on 2026-10-13: 4.15.1 on 7200-05, 4.20.1 on 7300-04; not run with `v1.4.8-aix2`):
+On AIX with `rpm.rte` 4.15 or newer (tested with `v1.4.8-aix4` on 2026-11-02: 4.20.1 on 7300-04; 4.15.1 on 7200-05 was tested on 2026-10-13):
 
 ```sh
 rpm --import KEYS
-rpm -K btop-1.4.8-3.aix6.1.ppc.rpm
+rpm -K btop-1.4.8-4.aix6.1.ppc.rpm
 ```
 
 Success: `rpm -K` prints `digests signatures OK`.
@@ -53,7 +53,7 @@ Success: `gpg` reports a good signature, and `sha256sum` prints `OK` for each fi
 ### 2a. Install the RPM
 
 ```sh
-rpm -ivh btop-1.4.8-3.aix6.1.ppc.rpm
+rpm -ivh btop-1.4.8-4.aix6.1.ppc.rpm
 btop          # /usr/bin/btop -> /opt/btop/bin/btop -> /opt/btop/bin/btop.bin
 ```
 
@@ -65,7 +65,7 @@ branch of the fork.
 The archive contains only `opt/btop`.
 
 ```sh
-cd / && gzip -dc btop-1.4.8-3.aix6.1.ppc.tar.gz | tar -xf -
+cd / && gzip -dc btop-1.4.8-4.aix6.1.ppc.tar.gz | tar -xf -
 ln -s /opt/btop/bin/btop /usr/bin/btop   # optional
 ```
 
@@ -74,7 +74,7 @@ Success: `/opt/btop/bin/btop --version` prints the version.
 ### 2c. Install the tar archive without root
 
 ```sh
-mkdir ~/btop && cd ~/btop && gzip -dc /path/to/btop-1.4.8-3.aix6.1.ppc.tar.gz | tar -xf -
+mkdir ~/btop && cd ~/btop && gzip -dc /path/to/btop-1.4.8-4.aix6.1.ppc.tar.gz | tar -xf -
 ~/btop/opt/btop/bin/btop
 ```
 
@@ -97,7 +97,7 @@ Success: btop draws its screen.
 
 | Message | Cause | Fix |
 |---|---|---|
-| `rpm -K` reports "NOT OK", but `rpm -Kv` shows "Header V4 RSA/SHA512 Signature, key ID da7addd4: OK" | `rpm.rte` 4.13 (tested on 7100-05) cannot evaluate the additional signature tag | verify `SHA256SUMS.asc` with GnuPG on another host and compare the SHA-256 sum |
+| `rpm -K` reports "NOT OK", but `rpm -Kv` shows "Header V4 RSA/SHA512 Signature, key ID da7addd4: OK" | `rpm.rte` 4.13 (tested on 7100-05 with `v1.4.8-aix3` and `v1.4.8-aix4`) does not know the SHA-256 digest of the header; `rpm -Kv` reports it as "BAD PARAMETERS (273 …)". `rpm -ivh` works | verify `SHA256SUMS.asc` with GnuPG on another host and compare the SHA-256 sum |
 | `rpm-info.txt` shows `Signature: (none)` | the build host wrote the file before signing | none needed; `SHA256SUMS` is the authoritative checksum list |
 | `rpm_share: 0645-007 ATTENTION: whichfs() returned an unexpected result` on `rpm -ivh` or `rpm -e`; `rpm -ivh` returns 1 | a mount layout of the host that `rpm_share` cannot map to a file system (seen once with `v1.4.7-aix3` on 7200-05) | none needed if `rpm -V btop` is clean; the files were installed and removed correctly |
 | rpm reports a missing `rpmlib(PayloadFilesHavePrefix)` | `rpm.rte` 3.0.5 | use the tar archive (step 2b or 2c) |

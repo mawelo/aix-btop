@@ -13,7 +13,8 @@ Only the latest release receives fixes.
 
 | Release | Status |
 |---|---|
-| `v1.4.8-aix3` | supported |
+| `v1.4.8-aix4` | supported |
+| `v1.4.8-aix3` | superseded: the binary contains directory names of the build host, as do the binaries of all earlier releases; this does not change how btop runs (fixed in `v1.4.8-aix4`) |
 | `v1.4.8-aix1`, `v1.4.8-aix2` | superseded: the search path for libraries contains directories that do not belong there (see "Library search path"; fixed in `v1.4.8-aix3`) |
 | `v1.4.7-aix4` | superseded: invalid UTF-8 in process names passed unchanged (matters only on a terminal in 8-bit mode); on AIX 6.1 and 7.1 the main loop spun for up to one second per update cycle (both fixed in `v1.4.8-aix1`) |
 | `v1.4.7-aix3` | superseded: control characters in process names reached the terminal of the user running btop (fixed in `v1.4.7-aix4`) |

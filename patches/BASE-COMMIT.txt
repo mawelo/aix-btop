@@ -1,5 +1,5 @@
 upstream repository: https://github.com/aristocratos/btop
 marking: the series is AI generated (CONTRIBUTING.md, "AI generated code"); every commit subject carries [AI generated]
 base commit (apply the series on top of this): cf1da5900b1e9eaa1c20fd7148dd812b43340b8a
-fork branch: https://github.com/mawelo/btop/tree/aix-public = a9f05e8eb8d84cefcc51fbadc8c341b6ce1a4f2e (base + these 5 patches; the package binary reports this commit)
+fork branch: https://github.com/mawelo/btop/tree/aix-public = 6b4ff5362cd868efe1cd61ca2c6665d9ff2b2f01 (base + these 5 patches; the package binary reports this commit)
 apply: git checkout cf1da5900b1e9eaa1c20fd7148dd812b43340b8a && git am --keep-non-patch patches/*.patch (keeps [AI generated] in the subjects)
