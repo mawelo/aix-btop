@@ -2,7 +2,7 @@
 
 Reading time: 4 min
 
-Applies to: `v1.4.8-aix4` (fork commit `6b4ff53`)    Verified: 2026-11-02    Revision: 7
+Applies to: `v1.4.8-aix4` (fork commit `6b4ff53`)    Verified: 2026-11-03    Revision: 9
 
 ## Package
 
@@ -15,12 +15,14 @@ compatible OS releases. The release number counts per upstream version: `v1.4.8-
 
 ## Test runs per AIX level
 
-The matrix lists one test run per AIX level with `v1.4.8-aix4` (`6b4ff53`) on 2026-11-02. The column rpm.rte
+The matrix lists one test run per AIX level with `v1.4.8-aix4` (`6b4ff53`). The run on 7300-02-01 took place on 2026-11-03, all other runs on 2026-11-02.
+The column rpm.rte
 gives the level of the installed `rpm.rte` fileset, taken from the software inventory of the hosts on 2026-10-30
 and 2026-10-31. "Load" means two single-threaded busy loops next to btop. "Launcher" means that
 `opt/btop/bin/btop` was started through a symlink in another directory, without `LANG`.
 
-The runs used the RPM and the tar archive of the CI build before signing. A second smoke test with the signed
+The runs used the RPM and the tar archive of the CI build before signing, except on 7300-02-01, which got the
+signed release package. A second smoke test with the signed
 release files gave the same result on all five hosts of the smoke test. The released RPM has the same payload
 (sha256 of the `rpm2cpio` output) and adds the header signature. The released tar archive is the same file.
 
@@ -31,6 +33,7 @@ release files gave the same result on all five hosts of the smoke test. The rele
 | 7100-02-01 | 3.0.5 | tar, in a private directory | yes, launcher | yes | yes |
 | 7100-05-03 | 4.13.0 | `rpm -ivh`, `rpm -V` | yes, through `/usr/bin/btop` | no | `rpm -e`, no files left |
 | 7200-05-05 | 4.15.1 | tar, in a private directory | yes, launcher | yes | yes |
+| 7300-02-01 | 4.18.1 | `rpm -Uvh` of the signed release package over `v1.4.8-aix3`, `rpm -V`, no group- or world-writable files | `--version` only | no | no (kept installed) |
 | 7300-04-00 | 4.20.1 | `rpm -ivh`, `rpm -V` | yes, through `/usr/bin/btop` | yes | `rpm -e`, no files left |
 
 On every tar host, `sh btop` and `ksh btop` inside `opt/btop/bin` started the binary next to them, although another
@@ -38,10 +41,10 @@ On every tar host, `sh btop` and `ksh btop` inside `opt/btop/bin` started the bi
 Its name contained ESC, BEL and the byte 0x9B (invalid UTF-8); btop replaced each of the three bytes with `?`.
 
 The binary searches libraries only in `/usr/lib:/lib`. The CI build checks this with `dump -X64 -H` for all three
-builds, and the build stops otherwise.
+builds, and the build stops otherwise. On 7300-02-01, `dump -X64 -H` showed the same value for the installed binary.
 
 The shipped binary has no symbol table. The package build stops if a directory name of the build host remains
-in the binary. A separate test program checked exceptions in a stripped binary on 6100-07, 6100-09, 7100-02,
+in the binary. A separate test program tested C++ exception handling in a stripped binary on 6100-07, 6100-09, 7100-02,
 7200-05 and 7300-04, one run each.
 
 ## MCP server runs
@@ -53,7 +56,7 @@ unknown tool with JSON-RPC error -32602.
 
 ## Not tested
 
-These levels were not tested: 6.1 TL8, 7.1 TL0/TL1/TL3/TL4, 7.2 TL0 to TL4, and 7.3 TL0/TL1/TL3. On 7.3 TL2 the update from `v1.4.8-aix3` has not run yet. `rpm -K` with the signed RPM printed `digests signatures OK` on 7300-04. On 7100-05, `rpm.rte` 4.13 reported `NOT OK`, because it does not know the SHA-256 digest of the header; the signature itself verified (see install.md, "If it fails"). AIX 6.1 and 7.1 are out of IBM support; the port does not change that.
+These levels were not tested: 6.1 TL8, 7.1 TL0/TL1/TL3/TL4, 7.2 TL0 to TL4, and 7.3 TL0/TL1/TL3. On 7300-02-01, `rpm -Uvh` reported `NOKEY` for the signature, because `KEYS` is not imported there; the signature was not checked on that host. `rpm -K` with the signed RPM printed `digests signatures OK` on 7300-04. On 7100-05, `rpm.rte` 4.13 reported `NOT OK`, because it does not know the SHA-256 digest of the header; the signature itself verified (see install.md, "If it fails"). AIX 6.1 and 7.1 are out of IBM support; the port does not change that.
 
 ## Files of the package
 
